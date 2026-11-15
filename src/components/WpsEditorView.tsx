@@ -1,30 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlignCenter,
-  AlignJustify,
-  AlignLeft,
-  AlignRight,
   ArrowLeft,
-  Bold,
   Check,
-  CheckSquare,
-  ChevronDown,
-  ChevronUp,
   Download,
-  Eraser,
   Eye,
   FileDown,
-  Highlighter,
-  Image as ImageIcon,
-  IndentDecrease,
-  IndentIncrease,
-  Italic,
-  Link2,
-  List,
-  ListOrdered,
   Loader2,
-  MessageSquarePlus,
-  Minus,
   Monitor,
   Pencil,
   Printer,
@@ -32,10 +13,6 @@ import {
   Search,
   Smartphone,
   SpellCheck,
-  Strikethrough,
-  Table2,
-  Trash2,
-  Underline,
   Undo2,
   X,
 } from 'lucide-react';
@@ -48,6 +25,10 @@ import {
   scanElementSpelling,
 } from '../lib/spellChecker';
 import { SpellCheckMenu, SpellContextMenuState } from './SpellCheckMenu';
+import WpsWordEditingBar, {
+  ToolDrawerTab,
+  WordActiveFormats,
+} from './WpsWordEditingBar';
 
 interface WpsEditorViewProps {
   document: WpsDocument;
@@ -56,26 +37,6 @@ interface WpsEditorViewProps {
   onUpdateDocument: (patch: Partial<WpsDocument>) => void;
   onExportDocument: (doc: WpsDocument, kind: 'doc' | 'html' | 'txt') => void;
 }
-
-type ToolDrawerTab = 'inicio' | 'insertar' | 'ver' | 'revisar';
-
-const TEXT_COLORS = [
-  { label: 'Negro', value: '#0f172a' },
-  { label: 'Gris', value: '#475569' },
-  { label: 'Rojo WPS', value: '#dc2626' },
-  { label: 'Azul', value: '#2563eb' },
-  { label: 'Verde', value: '#16a34a' },
-  { label: 'Ámbar', value: '#d97706' },
-  { label: 'Morado', value: '#7c3aed' },
-];
-
-const HIGHLIGHT_COLORS = [
-  { label: 'Sin resaltado', value: 'transparent' },
-  { label: 'Amarillo', value: '#fef08a' },
-  { label: 'Verde suave', value: '#bbf7d0' },
-  { label: 'Azul suave', value: '#bfdbfe' },
-  { label: 'Rosa suave', value: '#fecdd3' },
-];
 
 export default function WpsEditorView({
   document: doc,
@@ -86,7 +47,6 @@ export default function WpsEditorView({
 }: WpsEditorViewProps) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const spellScanTimerRef = useRef<number | null>(null);
 
@@ -102,7 +62,7 @@ export default function WpsEditorView({
   const [lineSpacing, setLineSpacing] = useState<'1.4' | '1.65' | '1.95'>('1.65');
 
   // Active formatting feedback
-  const [activeFormats, setActiveFormats] = useState({
+  const [activeFormats, setActiveFormats] = useState<WordActiveFormats>({
     bold: false,
     italic: false,
     underline: false,
@@ -117,14 +77,7 @@ export default function WpsEditorView({
   const [replaceTerm, setReplaceTerm] = useState('');
   const [findFeedback, setFindFeedback] = useState<string | null>(null);
 
-  // Insert Helpers
-  const [tableRows, setTableRows] = useState(3);
-  const [tableCols, setTableCols] = useState(3);
-  const [linkUrl, setLinkUrl] = useState('');
-  const [linkLabel, setLinkLabel] = useState('');
-
-  // Comments
-  const [newCommentText, setNewCommentText] = useState('');
+  const [printViewMode, setPrintViewMode] = useState(false);
 
   // Spellchecker
   const [spellCheckEnabled, setSpellCheckEnabled] = useState(true);
@@ -267,14 +220,15 @@ export default function WpsEditorView({
     }
   };
 
-  const persistEditorHtml = () => {
-    if (!editorRef.current) return;
+  const persistEditorHtml = (): string | undefined => {
+    if (!editorRef.current) return undefined;
     const html = editorRef.current.innerHTML;
     onUpdateDocument({
       contentHtml: html,
       updatedAt: 'Ahora mismo',
     });
     scheduleSpellScan();
+    return html;
   };
 
   const runFormatCommand = (command: string, value?: string) => {
@@ -291,58 +245,6 @@ export default function WpsEditorView({
     window.document.execCommand('insertHTML', false, html);
     persistEditorHtml();
     syncFormatState();
-  };
-
-  const handleInsertTable = () => {
-    const headerCells = Array.from({ length: tableCols })
-      .map((_, i) => `<th>Columna ${i + 1}</th>`)
-      .join('');
-    const bodyRows = Array.from({ length: Math.max(1, tableRows - 1) })
-      .map(
-        () =>
-          `<tr>${Array.from({ length: tableCols })
-            .map(() => '<td>Celda</td>')
-            .join('')}</tr>`,
-      )
-      .join('');
-
-    insertHtmlAtCursor(
-      `<table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table><p><br/></p>`,
-    );
-    setDrawerOpen(false);
-  };
-
-  const handleInsertChecklist = () => {
-    insertHtmlAtCursor(
-      `<p><input type="checkbox" style="margin-right:8px;" /> Elemento de verificación</p>`,
-    );
-  };
-
-  const handleInsertLink = () => {
-    const cleanUrl = linkUrl.trim();
-    if (!cleanUrl) return;
-    const safeUrl =
-      cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')
-        ? cleanUrl
-        : `https://${cleanUrl}`;
-    const label = linkLabel.trim() || safeUrl;
-    insertHtmlAtCursor(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a> `);
-    setLinkUrl('');
-    setLinkLabel('');
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        insertHtmlAtCursor(`<p><img src="${reader.result}" alt="${file.name}" /></p>`);
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-    setDrawerOpen(false);
   };
 
   // Find & Replace counting + replacement
@@ -513,8 +415,8 @@ export default function WpsEditorView({
     setSpellMenu(null);
   };
 
-  const handleAddComment = () => {
-    const text = newCommentText.trim();
+  const handleAddComment = (rawText: string) => {
+    const text = rawText.trim();
     if (!text) return;
     const selText = window.getSelection()?.toString().trim() || '';
     const comment: WpsComment = {
@@ -526,7 +428,6 @@ export default function WpsEditorView({
       resolved: false,
     };
     onUpdateDocument({ comments: [comment, ...doc.comments] });
-    setNewCommentText('');
   };
 
   const toggleCommentResolved = (id: string) => {
@@ -543,6 +444,35 @@ export default function WpsEditorView({
     });
   };
 
+  const triggerBrowserPrint = useCallback(() => {
+    const previousTitle = window.document.title;
+    window.document.title = doc.title?.trim() || 'ALX Office';
+    const restoreTitle = () => {
+      window.document.title = previousTitle;
+      window.removeEventListener('afterprint', restoreTitle);
+    };
+    window.addEventListener('afterprint', restoreTitle);
+    window.print();
+    window.setTimeout(() => {
+      window.document.title = previousTitle;
+    }, 1000);
+  }, [doc.title]);
+
+  const handleEnterPrintView = () => {
+    if (isEditing) {
+      persistEditorHtml();
+    }
+    setDrawerOpen(false);
+    setFindOpen(false);
+    setSpellMenu(null);
+    setPrintViewMode(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        triggerBrowserPrint();
+      });
+    });
+  };
+
   const fontStack =
     fontFamily === 'serif'
       ? 'var(--font-serif)'
@@ -551,149 +481,187 @@ export default function WpsEditorView({
         : 'var(--font-sans)';
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <input
-        ref={imageInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleImageUpload}
-        className="hidden"
-      />
+    <div
+      className={`wps-print-root flex min-h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100 ${
+        printViewMode ? 'alx-print-view' : ''
+      }`}
+    >
 
       {/* Compact Sticky Top Editor Bar (52px) */}
-      <header className="no-print sticky top-0 z-30 flex h-[52px] items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label="Volver a documentos"
-            className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-
-          <input
-            type="text"
-            value={doc.title}
-            onChange={(e) => onUpdateDocument({ title: e.target.value })}
-            aria-label="Título del documento"
-            className="min-w-[60px] flex-1 truncate rounded-lg bg-transparent px-2 py-1 font-display text-sm font-semibold text-slate-900 focus:bg-slate-100 focus:outline-none sm:text-base dark:text-slate-100 dark:focus:bg-slate-800"
-          />
-
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap px-1.5 text-[11px] font-medium text-slate-500 sm:text-xs dark:text-slate-400"
-          >
-            {syncStatus === 'saving' ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" />
-                <span>Guardando...</span>
-              </>
-            ) : (
-              <>
-                <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                <span>Guardado</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1 shrink-0">
-          {isEditing && (
-            <>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runFormatCommand('undo')}
-                aria-label="Deshacer"
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                <Undo2 className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runFormatCommand('redo')}
-                aria-label="Rehacer"
-                className="hidden min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                <Redo2 className="h-4 w-4" />
-              </button>
-            </>
-          )}
-
-          <button
-            type="button"
-            onClick={handleJumpToNextSpellError}
-            title={
-              spellCheckEnabled
-                ? spellErrors.length > 0
-                  ? `${spellErrors.length} error(es) ortográfico(s) — Clic para revisar`
-                  : 'Sin errores ortográficos'
-                : 'Activar corrector ortográfico'
-            }
-            aria-label="Revisar ortografía"
-            className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-              !spellCheckEnabled
-                ? 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'
-                : spellErrors.length > 0
-                  ? 'bg-red-50 text-[#EA3D2F] hover:bg-red-100 dark:bg-red-950/50 dark:text-red-400 dark:hover:bg-red-950/80'
-                  : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
-            }`}
-          >
-            <SpellCheck className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline font-mono tabular-nums">
-              {!spellCheckEnabled
-                ? 'Ortografía off'
-                : spellErrors.length > 0
-                  ? `${spellErrors.length}`
-                  : 'OK'}
+      {printViewMode ? (
+        <header className="no-print sticky top-0 z-30 flex h-[52px] items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-3 backdrop-blur-md sm:px-5 dark:border-slate-800 dark:bg-slate-900/95">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPrintViewMode(false)}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Volver al editor</span>
+            </button>
+            <span className="truncate font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Vista de impresión · {doc.title}
             </span>
-          </button>
+          </div>
 
           <button
             type="button"
-            onClick={() => setFindOpen((v) => !v)}
-            aria-label="Buscar y reemplazar"
-            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl transition-colors ${
-              findOpen
-                ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
+            onClick={triggerBrowserPrint}
+            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#EA3D2F] px-3.5 text-xs font-semibold text-white hover:bg-[#D63124] whitespace-nowrap shrink-0"
           >
-            <Search className="h-4 w-4" />
+            <Printer className="h-4 w-4" />
+            <span>Imprimir / PDF</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (isEditing) {
+        </header>
+      ) : (
+        <header className="no-print sticky top-0 z-30 flex h-[52px] items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
                 persistEditorHtml();
-                setDrawerOpen(false);
-              }
-              setIsEditing((v) => !v);
-            }}
-            className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-              isEditing
-                ? 'bg-[#EA3D2F] text-white hover:bg-[#D63124]'
-                : 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
-            }`}
-          >
-            {isEditing ? (
+                onBack();
+              }}
+              aria-label="Volver a documentos"
+              className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+
+            <input
+              type="text"
+              value={doc.title}
+              onChange={(e) => onUpdateDocument({ title: e.target.value })}
+              aria-label="Título del documento"
+              className="min-w-[60px] flex-1 truncate rounded-lg bg-transparent px-2 py-1 font-display text-sm font-semibold text-slate-900 focus:bg-slate-100 focus:outline-none sm:text-base dark:text-slate-100 dark:focus:bg-slate-800"
+            />
+
+            <div
+              role="status"
+              aria-live="polite"
+              className="hidden shrink-0 items-center gap-1 whitespace-nowrap px-1.5 text-xs font-medium text-slate-500 sm:flex dark:text-slate-400"
+            >
+              {syncStatus === 'saving' ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" />
+                  <span>Guardando...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                  <span>Guardado</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+            {isEditing && (
               <>
-                <Check className="h-3.5 w-3.5" />
-                <span>Listo</span>
-              </>
-            ) : (
-              <>
-                <Pencil className="h-3.5 w-3.5" />
-                <span>Editar</span>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => runFormatCommand('undo')}
+                  aria-label="Deshacer"
+                  className="flex min-h-[44px] min-w-[40px] sm:min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => runFormatCommand('redo')}
+                  aria-label="Rehacer"
+                  className="hidden min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  <Redo2 className="h-4 w-4" />
+                </button>
               </>
             )}
-          </button>
-        </div>
-      </header>
+
+            <button
+              type="button"
+              onClick={handleJumpToNextSpellError}
+              title={
+                spellCheckEnabled
+                  ? spellErrors.length > 0
+                    ? `${spellErrors.length} error(es) ortográfico(s) — Clic para revisar`
+                    : 'Sin errores ortográficos'
+                  : 'Activar corrector ortográfico'
+              }
+              aria-label="Revisar ortografía"
+              className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-2 sm:px-2.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                !spellCheckEnabled
+                  ? 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'
+                  : spellErrors.length > 0
+                    ? 'bg-red-50 text-[#EA3D2F] hover:bg-red-100 dark:bg-red-950/50 dark:text-red-400 dark:hover:bg-red-950/80'
+                    : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
+              }`}
+            >
+              <SpellCheck className="h-4 w-4 shrink-0" />
+              <span className="hidden md:inline font-mono tabular-nums">
+                {!spellCheckEnabled
+                  ? 'Ortografía off'
+                  : spellErrors.length > 0
+                    ? `${spellErrors.length}`
+                    : 'OK'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFindOpen((v) => !v)}
+              aria-label="Buscar y reemplazar"
+              className={`flex min-h-[44px] min-w-[40px] sm:min-w-[44px] items-center justify-center rounded-xl transition-colors ${
+                findOpen
+                  ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Search className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleEnterPrintView}
+              aria-label="Imprimir documento"
+              title="Vista de impresión e imprimir"
+              className="inline-flex min-h-[44px] min-w-[40px] sm:min-w-[44px] lg:px-2.5 items-center justify-center gap-1.5 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 whitespace-nowrap shrink-0 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Printer className="h-4 w-4 shrink-0" />
+              <span className="hidden lg:inline text-xs font-medium">Imprimir</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (isEditing) {
+                  persistEditorHtml();
+                  setDrawerOpen(false);
+                }
+                setIsEditing((v) => !v);
+              }}
+              className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 sm:px-3.5 ${
+                isEditing
+                  ? 'bg-[#EA3D2F] text-white hover:bg-[#D63124]'
+                  : 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+              }`}
+            >
+              {isEditing ? (
+                <>
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Listo</span>
+                </>
+              ) : (
+                <>
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span>Editar</span>
+                </>
+              )}
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Find & Replace Strip */}
       {findOpen && (
@@ -749,10 +717,10 @@ export default function WpsEditorView({
       )}
 
       {/* Scrollable Document Sheet Area */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 pb-32 sm:px-6 sm:py-8">
+      <div className="wps-print-scroll flex-1 overflow-y-auto px-3 py-4 pb-32 sm:px-6 sm:py-8">
         <div
           className={`wps-print-sheet mx-auto transition-all ${
-            layoutMode === 'page' ? 'max-w-[794px]' : 'max-w-[680px]'
+            layoutMode === 'page' || printViewMode ? 'max-w-[794px]' : 'max-w-[680px]'
           }`}
         >
           {/* Paper Sheet */}
@@ -760,17 +728,17 @@ export default function WpsEditorView({
             ref={paperRef}
             style={{
               fontFamily: fontStack,
-              fontSize: `${(16 * zoomPercent) / 100}px`,
-              lineHeight: lineSpacing,
+              fontSize: printViewMode ? '11pt' : `${(16 * zoomPercent) / 100}px`,
+              lineHeight: printViewMode ? '1.6' : lineSpacing,
             }}
-            className={`relative min-h-[68vh] rounded-2xl border p-5 shadow-sm sm:p-10 ${
-              eyeCareMode
+            className={`wps-print-paper relative min-h-[68vh] rounded-2xl border p-5 shadow-sm sm:p-10 ${
+              eyeCareMode && !printViewMode
                 ? 'border-[#E6D8B8] bg-[#FBF5E6] text-[#3B2F21]'
                 : 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100'
             }`}
           >
             {/* Non-destructive Spellcheck Wavy Underline Layer */}
-            {spellCheckEnabled && underlineRects.length > 0 && (
+            {spellCheckEnabled && !printViewMode && underlineRects.length > 0 && (
               <div
                 aria-hidden="true"
                 className="no-print pointer-events-none absolute inset-0 overflow-hidden"
@@ -792,7 +760,7 @@ export default function WpsEditorView({
 
             <div
               ref={editorRef}
-              contentEditable={isEditing}
+              contentEditable={isEditing && !printViewMode}
               spellCheck={false}
               suppressContentEditableWarning
               onInput={persistEditorHtml}
@@ -828,721 +796,178 @@ export default function WpsEditorView({
         </div>
       </div>
 
-      {/* Expandable Bottom WPS Tool Sheet (Inicio / Insertar / Ver / Revisar) */}
-      {drawerOpen && (
-        <div className="no-print fixed bottom-[52px] left-0 right-0 z-30 border-t border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
-          <div className="mx-auto max-w-5xl">
-            {/* Sheet Tabs */}
-            <div className="flex items-center justify-between border-b border-slate-200 px-3 dark:border-slate-800">
-              <div className="flex items-center gap-1 overflow-x-auto">
-                {(
-                  [
-                    { id: 'inicio', label: 'Inicio' },
-                    { id: 'insertar', label: 'Insertar' },
-                    { id: 'ver', label: 'Ver' },
-                    {
-                      id: 'revisar',
-                      label: `Revisar (${doc.comments.filter((c) => !c.resolved).length})`,
-                    },
-                  ] as { id: ToolDrawerTab; label: string }[]
-                ).map((tab) => (
+      {!printViewMode && (
+        <WpsWordEditingBar
+          drawerOpen={drawerOpen}
+          onDrawerOpenChange={setDrawerOpen}
+          drawerTab={drawerTab}
+          onDrawerTabChange={setDrawerTab}
+          activeFormats={activeFormats}
+          onRunCommand={runFormatCommand}
+          onInsertHtml={insertHtmlAtCursor}
+          spellCheckEnabled={spellCheckEnabled}
+          onToggleSpellCheck={() => setSpellCheckEnabled((v) => !v)}
+          spellErrorCount={spellErrors.length}
+          firstSpellErrorWord={spellErrors[0]?.word}
+          onJumpToNextSpellError={handleJumpToNextSpellError}
+          comments={doc.comments}
+          onAddComment={handleAddComment}
+          onToggleCommentResolved={toggleCommentResolved}
+          onDeleteComment={deleteComment}
+          viewTabContent={
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Modo de vista
+                </div>
+                <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
                   <button
-                    key={tab.id}
                     type="button"
-                    onClick={() => setDrawerTab(tab.id)}
-                    className={`min-h-[44px] border-b-2 px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                      drawerTab === tab.id
-                        ? 'border-[#EA3D2F] text-[#EA3D2F] dark:text-red-400'
-                        : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                    onClick={() => setLayoutMode('mobile')}
+                    className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium ${
+                      layoutMode === 'mobile'
+                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                        : 'text-slate-600 dark:text-slate-400'
                     }`}
                   >
-                    {tab.label}
+                    <Smartphone className="h-3.5 w-3.5" />
+                    <span>Móvil</span>
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => setLayoutMode('page')}
+                    className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium ${
+                      layoutMode === 'page'
+                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <Monitor className="h-3.5 w-3.5" />
+                    <span>Página A4</span>
+                  </button>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Cerrar panel de herramientas"
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-              >
-                <ChevronDown className="h-5 w-5" />
-              </button>
-            </div>
+              <div>
+                <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Tipografía de lectura
+                </div>
+                <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                  {(['sans', 'serif', 'mono'] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setFontFamily(f)}
+                      className={`min-h-[36px] rounded-lg px-3 text-xs font-medium capitalize ${
+                        fontFamily === f
+                          ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            {/* Sheet Body */}
-            <div className="max-h-[42vh] overflow-y-auto p-4 sm:p-5">
-              {/* TAB: INICIO */}
-              {drawerTab === 'inicio' && (
-                <div className="space-y-4">
-                  {/* Heading Styles */}
-                  <div>
-                    <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Estilos de párrafo
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { label: 'Normal', tag: 'P' },
-                        { label: 'Título 1', tag: 'H1' },
-                        { label: 'Título 2', tag: 'H2' },
-                        { label: 'Título 3', tag: 'H3' },
-                        { label: 'Cita', tag: 'BLOCKQUOTE' },
-                      ].map((item) => (
-                        <button
-                          key={item.tag}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => runFormatCommand('formatBlock', item.tag)}
-                          className="min-h-[40px] rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Alignment, Indent, Strike, Clear */}
-                  <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <div>
+                <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Zoom del lienzo ({zoomPercent}%)
+                </div>
+                <div className="flex items-center gap-2">
+                  {[85, 100, 115, 130].map((z) => (
                     <button
+                      key={z}
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('justifyLeft')}
-                      aria-label="Alinear a la izquierda"
-                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <AlignLeft className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('justifyCenter')}
-                      aria-label="Centrar"
-                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <AlignCenter className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('justifyRight')}
-                      aria-label="Alinear a la derecha"
-                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <AlignRight className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('justifyFull')}
-                      aria-label="Justificar"
-                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <AlignJustify className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('indent')}
-                      aria-label="Aumentar sangría"
-                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <IndentIncrease className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('outdent')}
-                      aria-label="Disminuir sangría"
-                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <IndentDecrease className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('strikeThrough')}
-                      aria-label="Tachado"
-                      className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border ${
-                        activeFormats.strikeThrough
+                      onClick={() => setZoomPercent(z)}
+                      className={`min-h-[36px] rounded-lg border px-2.5 font-mono text-xs tabular-nums ${
+                        zoomPercent === z
                           ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
                           : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
                       }`}
                     >
-                      <Strikethrough className="h-4 w-4" />
+                      {z}%
                     </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => runFormatCommand('removeFormat')}
-                      aria-label="Borrar formato"
-                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <Eraser className="h-4 w-4" />
-                      <span>Limpiar</span>
-                    </button>
-                  </div>
-
-                  {/* Text & Highlight Colors */}
-                  <div className="grid grid-cols-1 gap-4 border-t border-slate-100 pt-3 sm:grid-cols-2 dark:border-slate-800">
-                    <div>
-                      <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                        Color de fuente
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {TEXT_COLORS.map((c) => (
-                          <button
-                            key={c.value}
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => runFormatCommand('foreColor', c.value)}
-                            aria-label={`Color ${c.label}`}
-                            style={{ backgroundColor: c.value }}
-                            className="h-9 w-9 rounded-full border border-slate-300 transition-transform active:scale-95 dark:border-slate-600"
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                        <Highlighter className="h-3.5 w-3.5" />
-                        <span>Resaltado</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {HIGHLIGHT_COLORS.map((c) => (
-                          <button
-                            key={c.value}
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => runFormatCommand('hiliteColor', c.value)}
-                            aria-label={c.label}
-                            style={{ backgroundColor: c.value }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold text-slate-700 transition-transform active:scale-95 dark:border-slate-600"
-                          >
-                            {c.value === 'transparent' ? '×' : ''}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              )}
+              </div>
 
-              {/* TAB: INSERTAR */}
-              {drawerTab === 'insertar' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    {/* Table Builder */}
-                    <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                          <Table2 className="h-4 w-4 text-blue-600" />
-                          <span>Insertar tabla ({tableRows} × {tableCols})</span>
-                        </span>
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={handleInsertTable}
-                          className="min-h-[36px] rounded-lg bg-[#EA3D2F] px-3 text-xs font-semibold text-white hover:bg-[#D63124]"
-                        >
-                          Insertar
-                        </button>
-                      </div>
-                      <div className="mt-3 flex items-center gap-4 text-xs">
-                        <label className="flex items-center gap-2">
-                          <span className="text-slate-500">Filas</span>
-                          <input
-                            type="number"
-                            min={2}
-                            max={8}
-                            value={tableRows}
-                            onChange={(e) =>
-                              setTableRows(Math.max(2, Math.min(8, Number(e.target.value) || 2)))
-                            }
-                            className="h-9 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono tabular-nums dark:border-slate-700 dark:bg-slate-950"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <span className="text-slate-500">Columnas</span>
-                          <input
-                            type="number"
-                            min={2}
-                            max={6}
-                            value={tableCols}
-                            onChange={(e) =>
-                              setTableCols(Math.max(2, Math.min(6, Number(e.target.value) || 2)))
-                            }
-                            className="h-9 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono tabular-nums dark:border-slate-700 dark:bg-slate-950"
-                          />
-                        </label>
-                      </div>
-                    </div>
-
-                    {/* Link Builder */}
-                    <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        <Link2 className="h-4 w-4 text-blue-600" />
-                        <span>Insertar hipervínculo</span>
-                      </div>
-                      <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
-                        <input
-                          type="text"
-                          value={linkLabel}
-                          onChange={(e) => setLinkLabel(e.target.value)}
-                          placeholder="Texto"
-                          className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs dark:border-slate-700 dark:bg-slate-950"
-                        />
-                        <input
-                          type="text"
-                          value={linkUrl}
-                          onChange={(e) => setLinkUrl(e.target.value)}
-                          placeholder="https://..."
-                          className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs dark:border-slate-700 dark:bg-slate-950"
-                        />
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={handleInsertLink}
-                          className="h-9 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white dark:bg-blue-600"
-                        >
-                          Añadir
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Quick Insert Buttons */}
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => imageInputRef.current?.click()}
-                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <ImageIcon className="h-4 w-4 text-blue-600" />
-                      <span>Imagen local</span>
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={handleInsertChecklist}
-                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <CheckSquare className="h-4 w-4 text-emerald-600" />
-                      <span>Casilla de verificación</span>
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => insertHtmlAtCursor('<hr /><p><br/></p>')}
-                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <Minus className="h-4 w-4 text-slate-500" />
-                      <span>Separador</span>
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() =>
-                        insertHtmlAtCursor(
-                          `${new Date().toLocaleDateString('es-ES', {
-                            day: '2-digit',
-                            month: 'long',
-                            year: 'numeric',
-                          })} `,
-                        )
-                      }
-                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <span>Fecha actual</span>
-                    </button>
-                  </div>
+              <div>
+                <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Protección ocular e interlineado
                 </div>
-              )}
-
-              {/* TAB: VER */}
-              {drawerTab === 'ver' && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <div>
-                    <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Modo de vista
-                    </div>
-                    <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => setLayoutMode('mobile')}
-                        className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium ${
-                          layoutMode === 'mobile'
-                            ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                            : 'text-slate-600 dark:text-slate-400'
-                        }`}
-                      >
-                        <Smartphone className="h-3.5 w-3.5" />
-                        <span>Móvil</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLayoutMode('page')}
-                        className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium ${
-                          layoutMode === 'page'
-                            ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                            : 'text-slate-600 dark:text-slate-400'
-                        }`}
-                      >
-                        <Monitor className="h-3.5 w-3.5" />
-                        <span>Página A4</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Tipografía de lectura
-                    </div>
-                    <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                      {(['sans', 'serif', 'mono'] as const).map((f) => (
-                        <button
-                          key={f}
-                          type="button"
-                          onClick={() => setFontFamily(f)}
-                          className={`min-h-[36px] rounded-lg px-3 text-xs font-medium capitalize ${
-                            fontFamily === f
-                              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                              : 'text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          {f}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Zoom del lienzo ({zoomPercent}%)
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {[85, 100, 115, 130].map((z) => (
-                        <button
-                          key={z}
-                          type="button"
-                          onClick={() => setZoomPercent(z)}
-                          className={`min-h-[36px] rounded-lg border px-2.5 font-mono text-xs tabular-nums ${
-                            zoomPercent === z
-                              ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                              : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                          }`}
-                        >
-                          {z}%
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                      Protección ocular e interlineado
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEyeCareMode((v) => !v)}
-                        className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium ${
-                          eyeCareMode
-                            ? 'border-amber-600 bg-amber-50 text-amber-800'
-                            : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                        }`}
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>Sepia</span>
-                      </button>
-                      <select
-                        aria-label="Interlineado"
-                        value={lineSpacing}
-                        onChange={(e) =>
-                          setLineSpacing(e.target.value as '1.4' | '1.65' | '1.95')
-                        }
-                        className="h-9 rounded-lg border border-slate-200 bg-white px-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800"
-                      >
-                        <option value="1.4">1.4x</option>
-                        <option value="1.65">1.65x</option>
-                        <option value="1.95">1.95x</option>
-                      </select>
-                    </div>
-                  </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEyeCareMode((v) => !v)}
+                    className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium ${
+                      eyeCareMode
+                        ? 'border-amber-600 bg-amber-50 text-amber-800'
+                        : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                    }`}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Sepia</span>
+                  </button>
+                  <select
+                    aria-label="Interlineado"
+                    value={lineSpacing}
+                    onChange={(e) =>
+                      setLineSpacing(e.target.value as '1.4' | '1.65' | '1.95')
+                    }
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800"
+                  >
+                    <option value="1.4">1.4x</option>
+                    <option value="1.65">1.65x</option>
+                    <option value="1.95">1.95x</option>
+                  </select>
                 </div>
-              )}
-
-              {/* TAB: REVISAR Y EXPORTAR */}
-              {drawerTab === 'revisar' && (
-                <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-                  {/* Spellchecker & Export Options */}
-                  <div className="space-y-4 lg:col-span-5">
-                    <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <SpellCheck className="h-4 w-4 text-[#EA3D2F] dark:text-red-400" />
-                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            Corrector ortográfico
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setSpellCheckEnabled((v) => !v)}
-                          className={`min-h-[32px] rounded-lg px-2.5 text-xs font-semibold transition-colors ${
-                            spellCheckEnabled
-                              ? 'bg-[#EA3D2F] text-white hover:bg-[#D63124]'
-                              : 'border border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                          }`}
-                        >
-                          {spellCheckEnabled ? 'Activo' : 'Inactivo'}
-                        </button>
-                      </div>
-                      <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                        {spellCheckEnabled
-                          ? spellErrors.length > 0
-                            ? `${spellErrors.length} posible(s) error(es). Haz clic derecho sobre una palabra subrayada para ver sugerencias.`
-                            : 'No se detectaron errores ortográficos en este documento.'
-                          : 'Activa el corrector para subrayar errores y ver sugerencias contextuales.'}
-                      </p>
-                      {spellCheckEnabled && spellErrors.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDrawerOpen(false);
-                            handleJumpToNextSpellError();
-                          }}
-                          className="mt-2.5 inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-700"
-                        >
-                          <SpellCheck className="h-3.5 w-3.5" />
-                          <span>Corregir primer error ({spellErrors[0].word})</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-2.5">
-                      <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        Exportar e Imprimir
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onExportDocument(doc, 'doc')}
-                          className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        >
-                          <FileDown className="h-4 w-4 text-blue-600" />
-                          <span>Word (.doc)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onExportDocument(doc, 'html')}
-                          className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        >
-                          <Download className="h-4 w-4 text-emerald-600" />
-                          <span>Página (.html)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onExportDocument(doc, 'txt')}
-                          className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        >
-                          <Download className="h-4 w-4 text-slate-500" />
-                          <span>Texto (.txt)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => window.print()}
-                          className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        >
-                          <Printer className="h-4 w-4 text-[#EA3D2F]" />
-                          <span>Imprimir / PDF</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Comments */}
-                  <div className="space-y-3 lg:col-span-7">
-                    <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                      Comentarios de revisión ({doc.comments.length})
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newCommentText}
-                        onChange={(e) => setNewCommentText(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-                        placeholder="Añadir comentario sobre el documento..."
-                        className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-[#EA3D2F] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddComment}
-                        className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#EA3D2F] px-3.5 text-xs font-semibold text-white hover:bg-[#D63124]"
-                      >
-                        <MessageSquarePlus className="h-3.5 w-3.5" />
-                        <span>Comentar</span>
-                      </button>
-                    </div>
-
-                    {doc.comments.length > 0 && (
-                      <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
-                        {doc.comments.map((cm) => (
-                          <div key={cm.id} className="flex items-start justify-between gap-3 p-3 text-xs">
-                            <div className="min-w-0">
-                              <div className="font-medium text-slate-900 dark:text-slate-100">
-                                {cm.author} · <span className="font-normal text-slate-400">{cm.createdAt}</span>
-                                {cm.resolved && (
-                                  <span className="ml-2 text-emerald-600 dark:text-emerald-400">
-                                    Resuelto
-                                  </span>
-                                )}
-                              </div>
-                              {cm.quote && (
-                                <div className="mt-0.5 italic text-slate-500">
-                                  &ldquo;{cm.quote}&rdquo;
-                                </div>
-                              )}
-                              <div
-                                className={`mt-1 ${
-                                  cm.resolved
-                                    ? 'text-slate-400 line-through'
-                                    : 'text-slate-700 dark:text-slate-300'
-                                }`}
-                              >
-                                {cm.text}
-                              </div>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => toggleCommentResolved(cm.id)}
-                                className="rounded px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
-                              >
-                                {cm.resolved ? 'Reabrir' : 'Resolver'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteComment(cm.id)}
-                                aria-label="Eliminar comentario"
-                                className="rounded p-1.5 text-slate-400 hover:text-red-600"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
-          </div>
-        </div>
+          }
+          exportSection={
+            <div className="space-y-2.5">
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Exportar e Imprimir
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onExportDocument(doc, 'doc')}
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <FileDown className="h-4 w-4 text-blue-600" />
+                  <span>Word (.doc)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onExportDocument(doc, 'html')}
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <Download className="h-4 w-4 text-emerald-600" />
+                  <span>Página (.html)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onExportDocument(doc, 'txt')}
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <Download className="h-4 w-4 text-slate-500" />
+                  <span>Texto (.txt)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEnterPrintView}
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <Printer className="h-4 w-4 text-[#EA3D2F]" />
+                  <span>Imprimir / PDF</span>
+                </button>
+              </div>
+            </div>
+          }
+        />
       )}
-
-      {/* Ergonomic Bottom Quick-Formatting Bar (52px) */}
-      <footer className="no-print fixed bottom-0 left-0 right-0 z-40 flex h-[52px] items-center justify-between gap-1 border-t border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
-        <div className="flex items-center overflow-x-auto">
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => runFormatCommand('bold')}
-            aria-label="Negrita"
-            className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition-colors ${
-              activeFormats.bold
-                ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Bold className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => runFormatCommand('italic')}
-            aria-label="Cursiva"
-            className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition-colors ${
-              activeFormats.italic
-                ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Italic className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => runFormatCommand('underline')}
-            aria-label="Subrayado"
-            className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition-colors ${
-              activeFormats.underline
-                ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Underline className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => runFormatCommand('insertUnorderedList')}
-            aria-label="Lista con viñetas"
-            className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition-colors ${
-              activeFormats.unorderedList
-                ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <List className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => runFormatCommand('insertOrderedList')}
-            aria-label="Lista numerada"
-            className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition-colors ${
-              activeFormats.orderedList
-                ? 'bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400'
-                : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-            }`}
-          >
-            <ListOrdered className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleInsertChecklist}
-            aria-label="Insertar casilla"
-            className="hidden min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            <CheckSquare className="h-4 w-4" />
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setDrawerOpen((v) => !v)}
-          className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-            drawerOpen
-              ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-              : 'border border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-          }`}
-        >
-          <span>Herramientas</span>
-          {drawerOpen ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronUp className="h-4 w-4" />
-          )}
-        </button>
-      </footer>
     </div>
   );
 }

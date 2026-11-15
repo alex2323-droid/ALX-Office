@@ -3,6 +3,7 @@ import {
   Cloud,
   Copy,
   Download,
+  Eye,
   FilePlus2,
   FileText,
   FolderOpen,
@@ -27,6 +28,10 @@ import {
   computeDocStats,
 } from '../data/wpsDocuments';
 import { PWAInstallButton } from './PWAInstallButton';
+import {
+  TemplatePageThumbnail,
+  TemplatePreviewModal,
+} from './TemplatePreview';
 
 const FORMAT_FILTERS: ('ALL' | WpsFormat)[] = ['ALL', 'DOCX', 'DOC', 'PDF', 'PPTX', 'PPT', 'TXT'];
 
@@ -158,6 +163,9 @@ export default function WpsHomeView({
   const [actionSheetDoc, setActionSheetDoc] = useState<WpsDocument | null>(null);
   const [renamingDoc, setRenamingDoc] = useState<WpsDocument | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [previewTemplate, setPreviewTemplate] = useState<WpsTemplate | null>(
+    null,
+  );
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -470,29 +478,57 @@ export default function WpsHomeView({
 
             {/* Templates Section */}
             {activeTab === 'templates' ? (
-              <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {WPS_TEMPLATES.map((tpl) => (
-                  <button
+                  <article
                     key={tpl.id}
-                    type="button"
-                    onClick={() => onCreateFromTemplate(tpl)}
-                    className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 text-left transition-colors hover:border-[#EA3D2F]/60 hover:bg-red-50/20 active:scale-[0.99] dark:border-slate-800 dark:bg-slate-900 dark:hover:border-red-500/50"
+                    className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white transition-colors hover:border-[#EA3D2F]/50 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-red-500/40"
                   >
-                    <div>
-                      <div className="text-xs font-medium text-[#EA3D2F] dark:text-red-400">
-                        {tpl.category}
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTemplate(tpl)}
+                      aria-label={`Ampliar vista previa de ${tpl.title}`}
+                      className="group relative w-full text-left focus:outline-none"
+                    >
+                      <TemplatePageThumbnail template={tpl} size="md" />
+                      <span className="pointer-events-none absolute bottom-2.5 right-3 inline-flex items-center gap-1 rounded-lg bg-slate-900/80 px-2 py-1 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                        <Eye className="h-3 w-3" />
+                        <span>Ampliar</span>
+                      </span>
+                    </button>
+
+                    <div className="flex flex-1 flex-col justify-between p-4 sm:p-5">
+                      <div>
+                        <div className="text-xs font-medium text-[#EA3D2F] dark:text-red-400">
+                          {tpl.category}
+                        </div>
+                        <h2 className="mt-1 font-display text-base font-semibold text-slate-900 dark:text-slate-100">
+                          {tpl.title}
+                        </h2>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+                          {tpl.description}
+                        </p>
                       </div>
-                      <h2 className="mt-1.5 font-display text-base font-semibold text-slate-900 dark:text-slate-100">
-                        {tpl.title}
-                      </h2>
-                      <p className="mt-1.5 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                        {tpl.description}
-                      </p>
+
+                      <div className="mt-4 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewTemplate(tpl)}
+                          className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>Vista previa</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onCreateFromTemplate(tpl)}
+                          className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl bg-[#EA3D2F] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#D63124] active:scale-[0.98] whitespace-nowrap"
+                        >
+                          Usar plantilla
+                        </button>
+                      </div>
                     </div>
-                    <div className="mt-4 text-xs font-semibold text-slate-900 dark:text-slate-200">
-                      Usar plantilla →
-                    </div>
-                  </button>
+                  </article>
                 ))}
               </section>
             ) : (
@@ -518,16 +554,14 @@ export default function WpsHomeView({
                           key={tpl.id}
                           type="button"
                           onClick={() => onCreateFromTemplate(tpl)}
-                          className="flex min-w-[180px] shrink-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-colors hover:border-[#EA3D2F]/50 active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900"
+                          className="flex w-40 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition-colors hover:border-[#EA3D2F]/50 active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900"
                         >
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                            <FilePlus2 className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0">
+                          <TemplatePageThumbnail template={tpl} size="sm" />
+                          <div className="w-full p-3">
                             <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                               {tpl.title}
                             </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                               {tpl.category}
                             </div>
                           </div>
@@ -726,13 +760,7 @@ export default function WpsHomeView({
                 className="flex h-12 w-full items-center gap-3 text-left text-sm font-medium text-slate-800 hover:text-[#EA3D2F] dark:text-slate-200"
               >
                 <FileText className="h-4 w-4 text-slate-400" />
-                <span>
-                  {actionSheetDoc.format === 'PDF' ||
-                  actionSheetDoc.format === 'PPT' ||
-                  actionSheetDoc.format === 'PPTX'
-                    ? 'Abrir en visor'
-                    : 'Abrir en editor'}
-                </span>
+                <span>Abrir archivo</span>
               </button>
               <button
                 type="button"
@@ -840,6 +868,12 @@ export default function WpsHomeView({
           </div>
         </div>
       )}
+
+      <TemplatePreviewModal
+        template={previewTemplate}
+        onClose={() => setPreviewTemplate(null)}
+        onUseTemplate={onCreateFromTemplate}
+      />
     </div>
   );
 }

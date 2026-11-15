@@ -425,7 +425,7 @@ export default function App() {
   const offlineBanner = !isOnline ? (
     <div
       role="status"
-      className="fixed bottom-20 left-4 z-40 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-950/95 px-3 py-2 text-xs font-medium text-amber-200 shadow-lg backdrop-blur-md lg:bottom-4"
+      className="no-print fixed bottom-20 left-4 z-40 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-950/95 px-3 py-2 text-xs font-medium text-amber-200 shadow-lg backdrop-blur-md lg:bottom-4"
     >
       <WifiOff className="h-3.5 w-3.5 shrink-0 text-amber-400" />
       <span>Modo sin conexión — Documentos y app guardados en caché</span>
@@ -438,7 +438,9 @@ export default function App() {
         <>
           <WpsPdfViewer
             document={activeDoc}
+            syncStatus={syncStatus}
             onBack={() => setActiveDocId(null)}
+            onUpdateDocument={(patch) => handleUpdateDocument(activeDoc.id, patch)}
           />
           {offlineBanner}
         </>
@@ -450,7 +452,9 @@ export default function App() {
         <>
           <WpsPptViewer
             document={activeDoc}
+            syncStatus={syncStatus}
             onBack={() => setActiveDocId(null)}
+            onUpdateDocument={(patch) => handleUpdateDocument(activeDoc.id, patch)}
           />
           {offlineBanner}
         </>

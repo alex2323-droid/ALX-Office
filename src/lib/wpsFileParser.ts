@@ -15,7 +15,7 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function uint8ToBase64(bytes: Uint8Array): string {
+export function uint8ToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {

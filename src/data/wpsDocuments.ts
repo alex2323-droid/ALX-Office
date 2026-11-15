@@ -35,6 +35,7 @@ export type WpsSlideElement =
       borderColor?: string;
       rotationDeg?: number;
       paragraphs: WpsSlideParagraph[];
+      richHtml?: string;
       isTitle?: boolean;
       zIndex: number;
     }
@@ -104,8 +105,11 @@ export interface WpsSlide {
   id: string;
   index: number;
   title: string;
+  titleHtml?: string;
   subtitle?: string;
+  subtitleHtml?: string;
   bullets: string[];
+  bodyHtml?: string;
   table?: { headers: string[]; rows: string[][] };
   notes: string;
   slideWidthPx?: number;
