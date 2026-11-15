@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versión del release (ej. v1.0.0)'
+        description: 'Versión del release (ej. v2.0.0)'
         required: false
-        default: 'v1.0.0'
+        default: 'v2.0.0'
 
 permissions:
   contents: write
@@ -56,7 +56,7 @@ jobs:
 
       - name: Apply ALX Office launcher icon
         run: |
-          ICON_SRC="public/assets/aistudio/1794708396591_f43e1352.png"
+          ICON_SRC="public/assets/aistudio/1794773231252_a0df14cb.png"
           if [ -f "$ICON_SRC" ]; then
             if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
               sudo apt-get update && sudo apt-get install -y imagemagick
@@ -80,7 +80,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
-          PKG_VER=$(node -p "require('./package.json').version || '1.0.0'")
+          PKG_VER=$(node -p "require('./package.json').version || '2.0.0'")
 
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
             TAG="${{ inputs.version }}"
@@ -89,6 +89,27 @@ jobs:
           else
             TAG="v${PKG_VER}"
           fi
+
+          VERSION_NAME="${TAG#v}"
+          VERSION_CODE=$(node -e '
+            const parts = (process.argv[1] || "2.0.0").split(".").map((n) => parseInt(n, 10) || 0);
+            const [maj = 2, min = 0, pat = 0] = parts;
+            console.log(maj * 10000 + min * 100 + pat);
+          ' "$VERSION_NAME")
+
+          VERSION_CODE="$VERSION_CODE" VERSION_NAME="$VERSION_NAME" node -e '
+            const fs = require("fs");
+            const code = process.env.VERSION_CODE;
+            const name = process.env.VERSION_NAME;
+            for (const file of ["android/app/build.gradle", "android/app/build.gradle.kts"]) {
+              if (!fs.existsSync(file)) continue;
+              let content = fs.readFileSync(file, "utf8");
+              content = content
+                .replace(/versionCode\s*=?\s*\d+/, (m) => m.includes("=") ? `versionCode = ${code}` : `versionCode ${code}`)
+                .replace(/versionName\s*=?\s*["'\''][^"'\'']*["'\'']/, (m) => m.includes("=") ? `versionName = "${name}"` : `versionName "${name}"`);
+              fs.writeFileSync(file, content);
+            }
+          '
 
           cd android
           chmod +x gradlew

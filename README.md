@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/assets/aistudio/1794708396591_f43e1352.png" alt="Icono de ALX Office" width="112" />
+  <img src="public/assets/aistudio/1794773231252_a0df14cb.png" alt="Icono de ALX Office" width="112" />
 </p>
 
 # ALX Office
@@ -24,8 +24,8 @@ Suite de oficina móvil y aplicación web progresiva (**PWA**) para crear, visua
 
 Al subir el repositorio de **`alex2323-droid`** en GitHub (reemplazando `ALX-Office` por el nombre de tu repositorio), el icono y las tres capturas quedan disponibles en:
 
-- **Icono de la aplicación:** `public/assets/aistudio/1794708396591_f43e1352.png`
-  - URL raw: `https://raw.githubusercontent.com/alex2323-droid/ALX-Office/main/public/assets/aistudio/1794708396591_f43e1352.png`
+- **Icono de la aplicación:** `public/assets/aistudio/1794773231252_a0df14cb.png`
+  - URL raw: `https://raw.githubusercontent.com/alex2323-droid/ALX-Office/main/public/assets/aistudio/1794773231252_a0df14cb.png`
 - **Inicio:** `public/assets/aistudio/Screenshot_2026-11-14-21-51-43-529_com.android.chrome_70780b2d.png`
   - URL raw: `https://raw.githubusercontent.com/alex2323-droid/ALX-Office/main/public/assets/aistudio/Screenshot_2026-11-14-21-51-43-529_com.android.chrome_70780b2d.png`
 - **Editor de documentos:** `public/assets/aistudio/Screenshot_2026-11-14-21-52-43-329_com.android.chrome_3c5e6256.png`
@@ -35,12 +35,12 @@ Al subir el repositorio de **`alex2323-droid`** en GitHub (reemplazando `ALX-Off
 
 ## Paquete y Releases en GitHub
 
-- **Nombre del paquete (`package.json`):** `alx-office` (`v1.0.0`)
+- **Nombre del paquete (`package.json`):** `alx-office` (`v2.0.0`)
 - **ID del paquete Android (`applicationId` en `capacitor.config.json`):** `com.alx.office`
-- **Archivo APK de Release generado:** `ALX-Office-v1.0.0.apk`
+- **Archivo APK de Release generado:** `ALX-Office-v2.0.0.apk`
 - **Página de Releases:** `https://github.com/alex2323-droid/ALX-Office/releases/latest`
 - **Enlace directo de descarga del APK:**  
-  `https://github.com/alex2323-droid/ALX-Office/releases/download/v1.0.0/ALX-Office-v1.0.0.apk`
+  `https://github.com/alex2323-droid/ALX-Office/releases/download/v2.0.0/ALX-Office-v2.0.0.apk`
 
 El flujo automático [`.github/workflows/release-apk.yml`](.github/workflows/release-apk.yml) se ejecuta **automáticamente en cada push a `main` / `master`** (además de tags `v*` o ejecución manual desde **Actions**), compila el APK firmado y lo publica directamente en la sección **Releases** de GitHub.
 
