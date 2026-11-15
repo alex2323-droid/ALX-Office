@@ -7,8 +7,6 @@ on:
       - master
     tags:
       - 'v*'
-    paths-ignore:
-      - 'README.md'
   workflow_dispatch:
     inputs:
       version:
@@ -43,12 +41,12 @@ jobs:
 
       - name: Install dependencies and build PWA
         run: |
-          npm install
+          npm install --legacy-peer-deps
           npm run build
 
       - name: Prepare Capacitor Android project (com.alx.office)
         run: |
-          npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+          npm install --no-save --legacy-peer-deps @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
           if [ ! -d android ]; then
             npx cap add android
           fi
@@ -57,7 +55,10 @@ jobs:
       - name: Apply ALX Office launcher icon
         run: |
           ICON_SRC="public/assets/aistudio/1794708396591_f43e1352.png"
-          if [ -f "$ICON_SRC" ] && command -v convert >/dev/null 2>&1; then
+          if [ -f "$ICON_SRC" ]; then
+            if ! command -v convert >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y imagemagick
+            fi
             rm -rf android/app/src/main/res/mipmap-anydpi-v26
             for dir in mipmap-mdpi:48 mipmap-hdpi:72 mipmap-xhdpi:96 mipmap-xxhdpi:144 mipmap-xxxhdpi:192; do
               folder="${dir%%:*}"
@@ -95,7 +96,12 @@ jobs:
           SIGNED_APK="../${APK_NAME}"
 
           ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          BUILD_TOOLS_DIR=$(find "$ANDROID_SDK/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
+          BUILD_TOOLS_DIR=$(find "$ANDROID_SDK/build-tools" -maxdepth 1 -mindepth 1 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$BUILD_TOOLS_DIR" ]; then
+            yes | sdkmanager "build-tools;35.0.0" >/dev/null
+            BUILD_TOOLS_DIR="$ANDROID_SDK/build-tools/35.0.0"
+          fi
+
           "$BUILD_TOOLS_DIR/zipalign" -f -p 4 "$UNSIGNED_APK" app-release-aligned.apk
 
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
@@ -135,9 +141,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build_apk.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: ALX Office ${{ steps.build_apk.outputs.tag }}
           make_latest: true
           generate_release_notes: true
+          fail_on_unmatched_files: true
           body: |
             Paquete Android oficial de **ALX Office** (`com.alx.office`).
             Descarga e instala el archivo `${{ steps.build_apk.outputs.apk_name }}` directamente en tu dispositivo Android.
