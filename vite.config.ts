@@ -12,7 +12,7 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: [
-          'assets/aistudio/1794708396591_f43e1352.png',
+          'assets/aistudio/1794773231252_a0df14cb.png',
           'apple-touch-icon.png',
           'icon.svg',
           'pwa-192x192.png',
@@ -32,13 +32,13 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/assets/aistudio/1794708396591_f43e1352.png',
+              src: '/assets/aistudio/1794773231252_a0df14cb.png',
               sizes: '1649x1649',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/assets/aistudio/1794708396591_f43e1352.png',
+              src: '/assets/aistudio/1794773231252_a0df14cb.png',
               sizes: '1649x1649',
               type: 'image/png',
               purpose: 'maskable',
