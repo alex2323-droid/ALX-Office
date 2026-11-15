@@ -1,6 +1,6 @@
 {
   "name": "ALX Office",
-  "description": "Suite de oficina móvil para edición de documentos, hojas de cálculo, presentaciones y visores de PDF con integración de Google Drive y Google Picker.",
+  "description": "Suite de oficina móvil para edición de documentos Word (DOCX/DOC/TXT), archivos PDF y presentaciones PPT/PPTX con barra de edición unificada, uso sin conexión e integración con Google Drive.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

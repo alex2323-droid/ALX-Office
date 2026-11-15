@@ -2,8 +2,13 @@ name: Build & Release Android APK
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
+    paths-ignore:
+      - 'README.md'
   workflow_dispatch:
     inputs:
       version:
@@ -53,6 +58,7 @@ jobs:
         run: |
           ICON_SRC="public/assets/aistudio/1794708396591_f43e1352.png"
           if [ -f "$ICON_SRC" ] && command -v convert >/dev/null 2>&1; then
+            rm -rf android/app/src/main/res/mipmap-anydpi-v26
             for dir in mipmap-mdpi:48 mipmap-hdpi:72 mipmap-xhdpi:96 mipmap-xxhdpi:144 mipmap-xxxhdpi:192; do
               folder="${dir%%:*}"
               size="${dir##*:}"
@@ -70,23 +76,26 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
+          PKG_VER=$(node -p "require('./package.json').version || '1.0.0'")
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            TAG="${{ inputs.version }}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ] && [ -n "$GITHUB_REF_NAME" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="v${PKG_VER}"
+          fi
+
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease
-
-          TAG="${GITHUB_REF_NAME}"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.version }}"
-          fi
-          if [ -z "$TAG" ]; then
-            TAG="v1.0.0"
-          fi
 
           APK_NAME="ALX-Office-${TAG}.apk"
           UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
           SIGNED_APK="../${APK_NAME}"
 
-          BUILD_TOOLS_DIR=$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
+          ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          BUILD_TOOLS_DIR=$(find "$ANDROID_SDK/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           "$BUILD_TOOLS_DIR/zipalign" -f -p 4 "$UNSIGNED_APK" app-release-aligned.apk
 
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
@@ -127,5 +136,9 @@ jobs:
         with:
           tag_name: ${{ steps.build_apk.outputs.tag }}
           name: ALX Office ${{ steps.build_apk.outputs.tag }}
-          files: ${{ steps.build_apk.outputs.apk_name }}
+          make_latest: true
           generate_release_notes: true
+          body: |
+            Paquete Android oficial de **ALX Office** (`com.alx.office`).
+            Descarga e instala el archivo `${{ steps.build_apk.outputs.apk_name }}` directamente en tu dispositivo Android.
+          files: ${{ steps.build_apk.outputs.apk_name }}
