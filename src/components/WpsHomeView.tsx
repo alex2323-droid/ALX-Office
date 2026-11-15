@@ -218,9 +218,11 @@ export default function WpsHomeView({
         {/* Desktop Sidebar */}
         <aside className="hidden w-[264px] shrink-0 flex-col border-r border-slate-200 bg-white lg:flex dark:border-slate-800 dark:bg-slate-900">
           <div className="flex h-16 items-center gap-3 border-b border-slate-200 px-6 dark:border-slate-800">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EA3D2F] font-display text-sm font-bold text-white">
-              A
-            </div>
+            <img
+              src="/assets/aistudio/1794708396591_f43e1352.png"
+              alt="ALX Office"
+              className="h-8 w-8 shrink-0 rounded-lg object-cover shadow-xs"
+            />
             <span className="font-display text-base font-bold tracking-tight text-slate-900 whitespace-nowrap dark:text-slate-100">
               ALX Office
             </span>
@@ -318,9 +320,11 @@ export default function WpsHomeView({
           {/* Mobile Top App Bar (52px) */}
           <header className="sticky top-0 z-30 flex h-[52px] items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-3 backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/90">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#EA3D2F] font-display text-xs font-bold text-white">
-                A
-              </div>
+              <img
+                src="/assets/aistudio/1794708396591_f43e1352.png"
+                alt="ALX Office"
+                className="h-7 w-7 shrink-0 rounded-lg object-cover shadow-xs"
+              />
               <span className="truncate font-display text-base font-bold text-slate-900 dark:text-slate-100">
                 ALX Office
               </span>

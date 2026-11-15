@@ -32,6 +32,17 @@ Al subir este repositorio a GitHub, el icono y las tres capturas quedan alojados
 - **Visor PPTX:** `public/assets/aistudio/Screenshot_2026-11-14-21-52-24-276_com.android.chrome_2b1aa0c5.png`
   - URL raw: `https://raw.githubusercontent.com/<USUARIO>/<REPOSITORIO>/main/public/assets/aistudio/Screenshot_2026-11-14-21-52-24-276_com.android.chrome_2b1aa0c5.png`
 
+## Paquete y Releases en GitHub
+
+- **Nombre del paquete (`package.json`):** `alx-office` (`v1.0.0`)
+- **ID del paquete Android (`applicationId` en `capacitor.config.json`):** `com.alx.office`
+- **Archivo APK de Release generado:** `ALX-Office-v1.0.0.apk`
+- **Página de Releases:** `https://github.com/<USUARIO>/<REPOSITORIO>/releases/latest`
+- **Enlace directo de descarga del APK (ejemplo v1.0.0):**  
+  `https://github.com/<USUARIO>/<REPOSITORIO>/releases/download/v1.0.0/ALX-Office-v1.0.0.apk`
+
+El repositorio incluye el flujo automático [`.github/workflows/release-apk.yml`](.github/workflows/release-apk.yml) que compila y publica el APK en **GitHub Releases** al crear un tag (`git tag v1.0.0 && git push origin v1.0.0`) o al ejecutarlo manualmente desde la pestaña **Actions**.
+
 ## Desarrollo y compilación
 
 ```bash

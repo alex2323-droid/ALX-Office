@@ -1,0 +1,6 @@
+{
+  "appId": "com.alx.office",
+  "appName": "ALX Office",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
