@@ -1,16 +1,38 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  doc,
+  Firestore,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+function initFirestore(): Firestore {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalAutoDetectLongPolling: true,
+      },
+      firebaseConfig.firestoreDatabaseId,
+    );
+  } catch {
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
+export const db = initFirestore();
 export const auth = getAuth(app);
 
 let connectionTested = false;
 
 export async function testFirestoreConnection(): Promise<void> {
   if (connectionTested) return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
   connectionTested = true;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
