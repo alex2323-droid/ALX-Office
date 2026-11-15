@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/assets/aistudio/1794708396591_f43e1352.png" alt="Icono de ALX Office" width="112" />
+</p>
+
 # ALX Office
 
 Suite de oficina móvil y web progresiva (**PWA**) diseñada para editar y visualizar documentos **DOCX/DOC/TXT**, archivos **PDF** y presentaciones **PPT/PPTX** directamente en el navegador o instalada en Android/iOS con soporte sin conexión.
@@ -15,10 +19,12 @@ Suite de oficina móvil y web progresiva (**PWA**) diseñada para editar y visua
 | :---: | :---: | :---: |
 | ![Inicio de ALX Office](public/assets/aistudio/Screenshot_2026-11-14-21-51-43-529_com.android.chrome_70780b2d.png) | ![Editor de documentos ALX Office](public/assets/aistudio/Screenshot_2026-11-14-21-52-43-329_com.android.chrome_3c5e6256.png) | ![Visor PPTX de ALX Office](public/assets/aistudio/Screenshot_2026-11-14-21-52-24-276_com.android.chrome_2b1aa0c5.png) |
 
-## Enlaces directos de las capturas en GitHub
+## Enlaces directos de los recursos en GitHub
 
-Al subir este repositorio a GitHub, las tres imágenes quedan alojadas en las siguientes rutas relativas (y disponibles como URL directa reemplazando `<USUARIO>` y `<REPOSITORIO>`):
+Al subir este repositorio a GitHub, el icono y las tres capturas quedan alojados en las siguientes rutas relativas (y disponibles como URL directa reemplazando `<USUARIO>` y `<REPOSITORIO>`):
 
+- **Icono de la aplicación:** `public/assets/aistudio/1794708396591_f43e1352.png`
+  - URL raw: `https://raw.githubusercontent.com/<USUARIO>/<REPOSITORIO>/main/public/assets/aistudio/1794708396591_f43e1352.png`
 - **Inicio:** `public/assets/aistudio/Screenshot_2026-11-14-21-51-43-529_com.android.chrome_70780b2d.png`
   - URL raw: `https://raw.githubusercontent.com/<USUARIO>/<REPOSITORIO>/main/public/assets/aistudio/Screenshot_2026-11-14-21-51-43-529_com.android.chrome_70780b2d.png`
 - **Editor de documentos:** `public/assets/aistudio/Screenshot_2026-11-14-21-52-43-329_com.android.chrome_3c5e6256.png`
