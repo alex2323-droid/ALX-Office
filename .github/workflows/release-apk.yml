@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -37,7 +37,9 @@ jobs:
           java-version: 21
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Install dependencies and build PWA
         run: |
@@ -46,7 +48,7 @@ jobs:
 
       - name: Prepare Capacitor Android project (com.alx.office)
         run: |
-          npm install --no-save --legacy-peer-deps @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
+          npm install --no-save --legacy-peer-deps @capacitor/core@^8.0.0 @capacitor/cli@^8.0.0 @capacitor/android@^8.0.0
           if [ ! -d android ]; then
             npx cap add android
           fi
@@ -56,16 +58,17 @@ jobs:
         run: |
           ICON_SRC="public/assets/aistudio/1794708396591_f43e1352.png"
           if [ -f "$ICON_SRC" ]; then
-            if ! command -v convert >/dev/null 2>&1; then
+            if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
               sudo apt-get update && sudo apt-get install -y imagemagick
             fi
+            CONVERT_BIN=$(command -v magick || command -v convert)
             rm -rf android/app/src/main/res/mipmap-anydpi-v26
             for dir in mipmap-mdpi:48 mipmap-hdpi:72 mipmap-xhdpi:96 mipmap-xxhdpi:144 mipmap-xxxhdpi:192; do
               folder="${dir%%:*}"
               size="${dir##*:}"
               mkdir -p "android/app/src/main/res/$folder"
-              convert "$ICON_SRC" -resize "${size}x${size}" "android/app/src/main/res/$folder/ic_launcher.png"
-              convert "$ICON_SRC" -resize "${size}x${size}" "android/app/src/main/res/$folder/ic_launcher_round.png"
+              "$CONVERT_BIN" "$ICON_SRC" -resize "${size}x${size}" "android/app/src/main/res/$folder/ic_launcher.png"
+              "$CONVERT_BIN" "$ICON_SRC" -resize "${size}x${size}" "android/app/src/main/res/$folder/ic_launcher_round.png"
             done
           fi
 
@@ -89,17 +92,20 @@ jobs:
 
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
 
           APK_NAME="ALX-Office-${TAG}.apk"
           UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          fi
           SIGNED_APK="../${APK_NAME}"
 
           ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           BUILD_TOOLS_DIR=$(find "$ANDROID_SDK/build-tools" -maxdepth 1 -mindepth 1 2>/dev/null | sort -V | tail -n 1 || true)
           if [ -z "$BUILD_TOOLS_DIR" ]; then
-            yes | sdkmanager "build-tools;35.0.0" >/dev/null
-            BUILD_TOOLS_DIR="$ANDROID_SDK/build-tools/35.0.0"
+            yes | sdkmanager "build-tools;36.0.0" >/dev/null
+            BUILD_TOOLS_DIR="$ANDROID_SDK/build-tools/36.0.0"
           fi
 
           "$BUILD_TOOLS_DIR/zipalign" -f -p 4 "$UNSIGNED_APK" app-release-aligned.apk
