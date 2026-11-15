@@ -127,8 +127,9 @@ function findDescendants(root: Element | Document, localName: string): Element[]
   const start = root instanceof Document ? root.documentElement : root;
   if (!start) return result;
   const stack: Element[] = [start];
-  while (stack.length > 0) {
-    const node = stack.shift()!;
+  let head = 0;
+  while (head < stack.length) {
+    const node = stack[head++];
     if (node.localName === localName) result.push(node);
     for (let i = 0; i < node.children.length; i++) {
       stack.push(node.children[i]);
@@ -626,24 +627,29 @@ async function parseDocxToHtml(buffer: ArrayBuffer): Promise<string> {
   }
 
   const xml = new DOMParser().parseFromString(docXml, 'application/xml');
-  const paragraphs = Array.from(xml.getElementsByTagName('w:p'));
+  const body =
+    firstChild(xml.documentElement, 'body') || xml.documentElement;
   const htmlParts: string[] = [];
 
-  for (const p of paragraphs) {
-    const pStyle =
-      p.getElementsByTagName('w:pStyle')[0]?.getAttribute('w:val') || '';
-    const runs = Array.from(p.getElementsByTagName('w:r'));
+  const renderParagraph = (p: Element): string | null => {
+    const pPr = firstChild(p, 'pPr');
+    const pStyle = pPr
+      ? firstChild(pPr, 'pStyle')?.getAttribute('w:val') ||
+        firstChild(pPr, 'pStyle')?.getAttribute('val') ||
+        ''
+      : '';
+    const runs = findDescendants(p, 'r');
     let lineHtml = '';
 
     for (const r of runs) {
-      const texts = Array.from(r.getElementsByTagName('w:t'))
+      const texts = findDescendants(r, 't')
         .map((t) => t.textContent || '')
         .join('');
       if (!texts) continue;
 
-      const rPr = r.getElementsByTagName('w:rPr')[0];
-      const isBold = rPr && rPr.getElementsByTagName('w:b').length > 0;
-      const isItalic = rPr && rPr.getElementsByTagName('w:i').length > 0;
+      const rPr = firstChild(r, 'rPr');
+      const isBold = Boolean(rPr && firstChild(rPr, 'b'));
+      const isItalic = Boolean(rPr && firstChild(rPr, 'i'));
 
       let chunk = escapeHtml(texts);
       if (isBold) chunk = `<strong>${chunk}</strong>`;
@@ -651,33 +657,59 @@ async function parseDocxToHtml(buffer: ArrayBuffer): Promise<string> {
       lineHtml += chunk;
     }
 
-    if (!lineHtml.trim()) continue;
-    if (/heading1|title/i.test(pStyle)) {
-      htmlParts.push(`<h1>${lineHtml}</h1>`);
-    } else if (/heading2/i.test(pStyle)) {
-      htmlParts.push(`<h2>${lineHtml}</h2>`);
-    } else if (/heading3/i.test(pStyle)) {
-      htmlParts.push(`<h3>${lineHtml}</h3>`);
-    } else {
-      htmlParts.push(`<p>${lineHtml}</p>`);
-    }
-  }
+    if (!lineHtml.trim()) return null;
+    if (/heading1|title/i.test(pStyle)) return `<h1>${lineHtml}</h1>`;
+    if (/heading2/i.test(pStyle)) return `<h2>${lineHtml}</h2>`;
+    if (/heading3/i.test(pStyle)) return `<h3>${lineHtml}</h3>`;
+    return `<p>${lineHtml}</p>`;
+  };
 
-  const tables = Array.from(xml.getElementsByTagName('w:tbl'));
-  for (const tbl of tables) {
-    const rows = Array.from(tbl.getElementsByTagName('w:tr'));
-    if (rows.length === 0) continue;
+  const renderTable = (tbl: Element): string | null => {
+    const rows = directChildren(tbl, 'tr');
+    if (rows.length === 0) return null;
     const rowsHtml = rows
       .map((tr, rIdx) => {
-        const cells = Array.from(tr.getElementsByTagName('w:tc'));
+        const cells = directChildren(tr, 'tc');
         const tag = rIdx === 0 ? 'th' : 'td';
         const cellsHtml = cells
-          .map((tc) => `<${tag}>${escapeHtml(tc.textContent?.trim() || '')}</${tag}>`)
+          .map((tc) => {
+            const cellParagraphs = directChildren(tc, 'p')
+              .map((cp) => (cp.textContent || '').trim())
+              .filter(Boolean);
+            const cellText =
+              cellParagraphs.length > 0
+                ? cellParagraphs.join(' ')
+                : tc.textContent?.trim() || '';
+            return `<${tag}>${escapeHtml(cellText)}</${tag}>`;
+          })
           .join('');
         return `<tr>${cellsHtml}</tr>`;
       })
       .join('');
-    htmlParts.push(`<table><tbody>${rowsHtml}</tbody></table>`);
+    return `<table><tbody>${rowsHtml}</tbody></table>`;
+  };
+
+  const processBlock = (node: Element) => {
+    if (node.localName === 'p') {
+      const html = renderParagraph(node);
+      if (html) htmlParts.push(html);
+    } else if (node.localName === 'tbl') {
+      const html = renderTable(node);
+      if (html) htmlParts.push(html);
+    } else if (node.localName === 'sdt') {
+      const sdtContent = firstChild(node, 'sdtContent');
+      if (sdtContent) {
+        for (const child of directChildren(sdtContent)) {
+          processBlock(child);
+        }
+      }
+    }
+  };
+
+  if (body) {
+    for (const child of directChildren(body)) {
+      processBlock(child);
+    }
   }
 
   return htmlParts.join('') || '<p>(Documento DOCX vacío)</p>';

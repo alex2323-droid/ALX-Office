@@ -34,6 +34,14 @@ import {
   WpsSlideElement,
   WpsSlideParagraph,
 } from '../data/wpsDocuments';
+import { useDocumentHistory } from '../hooks/useDocumentHistory';
+import {
+  hideSoftKeyboard,
+  isRangeInsideElement,
+  prepareSelectionForBlockInsert,
+  runCommandWithoutKeyboardPopup,
+  syncCheckboxAttribute,
+} from '../lib/editorDom';
 import {
   SpellErrorMatch,
   getSpellingSuggestions,
@@ -46,6 +54,11 @@ import WpsWordEditingBar, {
   ToolDrawerTab,
   WordActiveFormats,
 } from './WpsWordEditingBar';
+
+interface PptHistorySnapshot {
+  slides: WpsSlide[];
+  title: string;
+}
 
 interface WpsPptViewerProps {
   document: WpsDocument;
@@ -116,30 +129,44 @@ function slideTextElementToHtml(
   if (el.richHtml !== undefined) return el.richHtml;
   if (!el.paragraphs || el.paragraphs.length === 0) return '<p></p>';
 
-  return el.paragraphs
-    .map((p) => {
-      const inner = p.runs
-        .map((r) => {
-          if (r.text === '\n') return '<br />';
-          const styles: string[] = [];
-          if (r.color) styles.push(`color:${r.color}`);
-          if (r.fontSizePt) styles.push(`font-size:${Math.round(r.fontSizePt * 1.333)}px`);
-          let chunk = escapeHtml(r.text);
-          if (r.bold || el.isTitle) chunk = `<strong>${chunk}</strong>`;
-          if (r.italic) chunk = `<em>${chunk}</em>`;
-          if (r.underline) chunk = `<u>${chunk}</u>`;
-          if (styles.length > 0) {
-            chunk = `<span style="${styles.join(';')}">${chunk}</span>`;
-          }
-          return chunk;
-        })
-        .join('');
-      const align = p.align ? ` style="text-align:${p.align}"` : '';
-      return p.bullet
-        ? `<ul${align}><li>${inner || '<br />'}</li></ul>`
-        : `<p${align}>${inner || '<br />'}</p>`;
-    })
-    .join('');
+  const parts: string[] = [];
+  let bulletItems: string[] = [];
+
+  const flushBullets = () => {
+    if (bulletItems.length > 0) {
+      parts.push(`<ul>${bulletItems.join('')}</ul>`);
+      bulletItems = [];
+    }
+  };
+
+  for (const p of el.paragraphs) {
+    const inner = p.runs
+      .map((r) => {
+        if (r.text === '\n') return '<br />';
+        const styles: string[] = [];
+        if (r.color) styles.push(`color:${r.color}`);
+        if (r.fontSizePt) styles.push(`font-size:${Math.round(r.fontSizePt * 1.333)}px`);
+        let chunk = escapeHtml(r.text);
+        if (r.bold || el.isTitle) chunk = `<strong>${chunk}</strong>`;
+        if (r.italic) chunk = `<em>${chunk}</em>`;
+        if (r.underline) chunk = `<u>${chunk}</u>`;
+        if (styles.length > 0) {
+          chunk = `<span style="${styles.join(';')}">${chunk}</span>`;
+        }
+        return chunk;
+      })
+      .join('');
+    const align = p.align ? ` style="text-align:${p.align}"` : '';
+    if (p.bullet) {
+      bulletItems.push(`<li${align}>${inner || '<br />'}</li>`);
+    } else {
+      flushBullets();
+      parts.push(`<p${align}>${inner || '<br />'}</p>`);
+    }
+  }
+  flushBullets();
+
+  return parts.join('');
 }
 
 function htmlToSlideParagraphs(
@@ -214,6 +241,7 @@ function RichEditableBox({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<number | null>(null);
   const latestErrorsRef = useRef<SpellErrorMatch[]>([]);
+  const lastEmittedHtmlRef = useRef<string>(html);
   const [underlineRects, setUnderlineRects] = useState<
     { id: string; left: number; top: number; width: number }[]
   >([]);
@@ -293,9 +321,12 @@ function RichEditableBox({
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    if (window.document.activeElement !== el && el.innerHTML !== html) {
-      el.innerHTML = html;
-    } else if (el.innerHTML === '' && html !== '') {
+    if (html !== lastEmittedHtmlRef.current || el.innerHTML === '') {
+      if (el.innerHTML !== html) {
+        el.innerHTML = html;
+      }
+      lastEmittedHtmlRef.current = html;
+    } else if (window.document.activeElement !== el && el.innerHTML !== html) {
       el.innerHTML = html;
     }
     const raf = window.requestAnimationFrame(() => runScan());
@@ -313,6 +344,24 @@ function RichEditableBox({
     );
     return () => window.cancelAnimationFrame(raf);
   }, [scale, computeRects]);
+
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const reposition = () => computeRects(latestErrorsRef.current);
+    const observer =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(reposition)
+        : null;
+    observer?.observe(el);
+    window.addEventListener('resize', reposition);
+    window.visualViewport?.addEventListener('resize', reposition);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', reposition);
+      window.visualViewport?.removeEventListener('resize', reposition);
+    };
+  }, [computeRects]);
 
   const findErrorAtPoint = (clientX: number, clientY: number): SpellErrorMatch | null => {
     for (const err of latestErrorsRef.current) {
@@ -366,7 +415,11 @@ function RichEditableBox({
           onSyncFormats();
         }}
         onInput={(e) => {
+          e.currentTarget
+            .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+            .forEach(syncCheckboxAttribute);
           const next = e.currentTarget.innerHTML;
+          lastEmittedHtmlRef.current = next;
           onActivate(fieldKey, e.currentTarget);
           onChangeHtml(next);
           scheduleScan();
@@ -404,6 +457,17 @@ function RichEditableBox({
         }}
         onClick={(e) => {
           e.stopPropagation();
+          const target = e.target;
+          if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+            syncCheckboxAttribute(target);
+            hideSoftKeyboard();
+            if (editorRef.current) {
+              const next = editorRef.current.innerHTML;
+              lastEmittedHtmlRef.current = next;
+              onChangeHtml(next);
+            }
+            return;
+          }
           if (editorRef.current) {
             onActivate(fieldKey, editorRef.current);
           }
@@ -414,6 +478,8 @@ function RichEditableBox({
           if (!isCoarse) return;
           const matched = findErrorAtPoint(e.clientX, e.clientY);
           if (matched) {
+            e.preventDefault();
+            hideSoftKeyboard();
             onOpenSpellMenu(
               {
                 errorId: matched.id,
@@ -429,7 +495,7 @@ function RichEditableBox({
           }
         }}
         style={style}
-        className={`wps-doc-canvas relative z-[1] h-full w-full outline-none ${className}`}
+        className={`wps-doc-canvas [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 relative z-[1] h-full w-full outline-none ${className}`}
       />
     </div>
   );
@@ -788,12 +854,18 @@ function SlideStage({
             ...baseStyle,
             transform: el.rotationDeg ? `rotate(${el.rotationDeg}deg)` : undefined,
             backgroundColor: el.fillColor || 'transparent',
-            border: isSelectedText
+            border: el.borderColor ? `1.5px solid ${el.borderColor}` : undefined,
+            outline: isSelectedText
               ? '2px solid #EA580C'
               : '1px dashed rgba(148, 163, 184, 0.7)',
+            outlineOffset: '-1px',
             borderRadius: '6px',
             padding: '4px 8px',
-            overflow: 'auto',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: el.isTitle ? 'center' : 'flex-start',
           }}
         >
           <RichEditableBox
@@ -831,6 +903,7 @@ function SlideStage({
               color: firstRun?.color || '#0F172A',
               textAlign: firstParaAlign,
               lineHeight: 1.3,
+              height: el.isTitle ? 'auto' : '100%',
             }}
           />
         </div>
@@ -848,6 +921,9 @@ function SlideStage({
             border: el.borderColor ? `1.5px solid ${el.borderColor}` : undefined,
             padding: '4px 8px',
             overflow: 'visible',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: el.isTitle ? 'center' : 'flex-start',
             fontSize: `${fontPx}px`,
             color: firstRun?.color || '#0F172A',
             textAlign: firstParaAlign,
@@ -855,7 +931,7 @@ function SlideStage({
           }}
         >
           <div
-            className="wps-doc-canvas"
+            className="wps-doc-canvas [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5"
             dangerouslySetInnerHTML={{ __html: el.richHtml }}
           />
         </div>
@@ -1131,11 +1207,15 @@ function StructuredSlideCanvas({
         {/* Title */}
         {editMode && onChangeSlide ? (
           <div
-            className={`mb-2.5 rounded-lg border px-2 py-1 transition-colors ${
-              activeFieldKey === titleKey
-                ? 'border-[#EA580C]'
-                : 'border-dashed border-slate-400/50'
-            }`}
+            style={{
+              marginBottom: slide.subtitle !== undefined ? '10px' : '18px',
+              outline:
+                activeFieldKey === titleKey
+                  ? '2px solid #EA580C'
+                  : '1px dashed rgba(148, 163, 184, 0.55)',
+              outlineOffset: '3px',
+              borderRadius: '4px',
+            }}
           >
             <RichEditableBox
               fieldKey={titleKey}
@@ -1163,7 +1243,7 @@ function StructuredSlideCanvas({
                 lineHeight: 1.2,
                 color: surface.text,
               }}
-              className="font-display"
+              className="font-display [&_p]:mb-0"
             />
           </div>
         ) : slide.titleHtml !== undefined ? (
@@ -1174,7 +1254,7 @@ function StructuredSlideCanvas({
               lineHeight: 1.2,
               marginBottom: slide.subtitle ? '10px' : '18px',
             }}
-            className="wps-doc-canvas font-display"
+            className="wps-doc-canvas font-display [&_p]:mb-0"
             dangerouslySetInnerHTML={{ __html: slide.titleHtml }}
           />
         ) : (
@@ -1195,11 +1275,15 @@ function StructuredSlideCanvas({
         {editMode && onChangeSlide
           ? slide.subtitle !== undefined && (
               <div
-                className={`mb-3 rounded-lg border px-2 py-1 transition-colors ${
-                  activeFieldKey === subtitleKey
-                    ? 'border-[#EA580C]'
-                    : 'border-dashed border-slate-400/40'
-                }`}
+                style={{
+                  marginBottom: '18px',
+                  outline:
+                    activeFieldKey === subtitleKey
+                      ? '2px solid #EA580C'
+                      : '1px dashed rgba(148, 163, 184, 0.45)',
+                  outlineOffset: '3px',
+                  borderRadius: '4px',
+                }}
               >
                 <RichEditableBox
                   fieldKey={subtitleKey}
@@ -1223,9 +1307,10 @@ function StructuredSlideCanvas({
                   }
                   style={{
                     fontSize: '18px',
-                    lineHeight: 1.38,
+                    lineHeight: 1.4,
                     color: surface.sub,
                   }}
+                  className="[&_p]:mb-0"
                 />
               </div>
             )
@@ -1237,7 +1322,7 @@ function StructuredSlideCanvas({
                   color: surface.sub,
                   marginBottom: '18px',
                 }}
-                className="wps-doc-canvas"
+                className="wps-doc-canvas [&_p]:mb-0"
                 dangerouslySetInnerHTML={{ __html: slide.subtitleHtml }}
               />
             ) : (
@@ -1258,11 +1343,15 @@ function StructuredSlideCanvas({
         {/* Rich Body (Supports full Word formatting: bold, italic, lists, checklists, tables, images) */}
         {editMode && onChangeSlide ? (
           <div
-            className={`min-h-[120px] flex-1 overflow-auto rounded-lg border px-2.5 py-2 transition-colors ${
-              activeFieldKey === bodyKey
-                ? 'border-[#EA580C]'
-                : 'border-dashed border-slate-400/40'
-            }`}
+            style={{
+              outline:
+                activeFieldKey === bodyKey
+                  ? '2px solid #EA580C'
+                  : '1px dashed rgba(148, 163, 184, 0.45)',
+              outlineOffset: '3px',
+              borderRadius: '4px',
+            }}
+            className="min-h-[120px] flex-1 overflow-y-auto overflow-x-hidden"
           >
             <RichEditableBox
               fieldKey={bodyKey}
@@ -1298,7 +1387,7 @@ function StructuredSlideCanvas({
               lineHeight: 1.4,
               color: surface.text,
             }}
-            className="wps-doc-canvas flex-1 overflow-hidden"
+            className="wps-doc-canvas [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 flex-1 overflow-hidden"
             dangerouslySetInnerHTML={{ __html: slide.bodyHtml }}
           />
         ) : (
@@ -1505,25 +1594,71 @@ export default function WpsPptViewer({
     return found && found.type === 'text' ? found : null;
   }, [activeSlide.elements, selectedElementId]);
 
+  const history = useDocumentHistory<PptHistorySnapshot>(
+    { slides, title: doc.title },
+    doc.id,
+    {
+      equals: (a, b) => a.title === b.title && a.slides === b.slides,
+    },
+  );
+
+  useEffect(() => {
+    history.syncExternal({ slides, title: doc.title });
+  }, [slides, doc.title, history]);
+
   const commitSlides = useCallback(
-    (nextSlides: WpsSlide[]) => {
+    (nextSlides: WpsSlide[], immediate = false) => {
       if (!onUpdateDocument) return;
       const reindexed = nextSlides.map((s, idx) => ({ ...s, index: idx + 1 }));
+      const snapshot: PptHistorySnapshot = {
+        slides: reindexed,
+        title: doc.title,
+      };
+      if (immediate) {
+        history.pushImmediate(snapshot);
+      } else {
+        history.recordDebounced(snapshot);
+      }
       onUpdateDocument({
         slides: reindexed,
+        updatedAt: 'Ahora mismo',
+      });
+    },
+    [doc.title, history, onUpdateDocument],
+  );
+
+  const updateActiveSlide = useCallback(
+    (updater: (prev: WpsSlide) => WpsSlide, immediate = false) => {
+      const next = slides.map((s, idx) => (idx === currentIdx ? updater(s) : s));
+      commitSlides(next, immediate);
+    },
+    [slides, currentIdx, commitSlides],
+  );
+
+  const applyHistorySnapshot = useCallback(
+    (snapshot: PptHistorySnapshot | null) => {
+      if (!snapshot || !onUpdateDocument) return;
+      setSpellMenu(null);
+      savedRangeRef.current = null;
+      setCurrentIdx((i) => Math.max(0, Math.min(snapshot.slides.length - 1, i)));
+      onUpdateDocument({
+        slides: snapshot.slides,
+        title: snapshot.title,
         updatedAt: 'Ahora mismo',
       });
     },
     [onUpdateDocument],
   );
 
-  const updateActiveSlide = useCallback(
-    (updater: (prev: WpsSlide) => WpsSlide) => {
-      const next = slides.map((s, idx) => (idx === currentIdx ? updater(s) : s));
-      commitSlides(next);
-    },
-    [slides, currentIdx, commitSlides],
-  );
+  const handleUndo = useCallback(() => {
+    const prev = history.undo();
+    applyHistorySnapshot(prev);
+  }, [applyHistorySnapshot, history]);
+
+  const handleRedo = useCallback(() => {
+    const next = history.redo();
+    applyHistorySnapshot(next);
+  }, [applyHistorySnapshot, history]);
 
   const handleRegisterEditable = useCallback(
     (fieldKey: string, el: HTMLDivElement | null) => {
@@ -1545,7 +1680,10 @@ export default function WpsPptViewer({
           ? editableMapRef.current[activeFieldKeyRef.current]
           : null;
         if (activeEl && anchor && activeEl.contains(anchor)) {
-          savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+          const range = sel.getRangeAt(0);
+          if (isRangeInsideElement(range, activeEl)) {
+            savedRangeRef.current = range.cloneRange();
+          }
         }
       }
       setActiveFormats({
@@ -1597,26 +1735,33 @@ export default function WpsPptViewer({
   }, [activeSlide, hasExplicitRichLayout]);
 
   const runWordCommand = (command: string, value?: string) => {
+    if (command === 'undo') {
+      handleUndo();
+      return;
+    }
+    if (command === 'redo') {
+      handleRedo();
+      return;
+    }
     const target = getPreferredEditableElement();
     if (!target) return;
     const { key, el } = target;
     activeFieldKeyRef.current = key;
     setActiveFieldKey(key);
-    el.focus();
 
-    const sel = window.getSelection();
-    if (
-      sel &&
-      savedRangeRef.current &&
-      el.contains(savedRangeRef.current.commonAncestorContainer)
-    ) {
-      sel.removeAllRanges();
-      sel.addRange(savedRangeRef.current);
-    }
+    const isBlockInsertion =
+      command === 'insertHTML' &&
+      typeof value === 'string' &&
+      /<(table|hr|p|h[1-3]|ul|ol|blockquote)\b/i.test(value);
 
-    window.document.execCommand(command, false, value);
-    // Notify RichEditableBox onInput handler so slide model persists and spellcheck updates
+    runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+      if (isBlockInsertion) {
+        prepareSelectionForBlockInsert(el, savedRangeRef.current);
+      }
+      window.document.execCommand(command, false, value);
+    });
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    history.commitPending();
     syncFormatState();
   };
 
@@ -1688,18 +1833,20 @@ export default function WpsPptViewer({
     if (!menu.range.startContainer.isConnected || !targetEl) return;
 
     try {
-      targetEl.focus();
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(menu.range);
-      }
-      const applied = window.document.execCommand('insertText', false, replacement);
-      if (!applied) {
-        menu.range.deleteContents();
-        menu.range.insertNode(window.document.createTextNode(replacement));
-      }
+      runCommandWithoutKeyboardPopup(targetEl, menu.range, () => {
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(menu.range);
+        }
+        const applied = window.document.execCommand('insertText', false, replacement);
+        if (!applied) {
+          menu.range.deleteContents();
+          menu.range.insertNode(window.document.createTextNode(replacement));
+        }
+      });
       targetEl.dispatchEvent(new Event('input', { bubbles: true }));
+      history.commitPending();
       syncFormatState();
     } catch {
       // Ignore stale range errors
@@ -1773,7 +1920,7 @@ export default function WpsPptViewer({
       newSlide,
       ...slides.slice(currentIdx + 1),
     ];
-    commitSlides(next);
+    commitSlides(next, true);
     setCurrentIdx(currentIdx + 1);
     setSelectedElementId(null);
     activeFieldKeyRef.current = null;
@@ -1787,7 +1934,9 @@ export default function WpsPptViewer({
       title: `${activeSlide.title} (Copia)`,
       bullets: [...activeSlide.bullets],
       elements: activeSlide.elements
-        ? activeSlide.elements.map((el) => ({ ...el, id: `${el.id}-c` }))
+        ? (JSON.parse(JSON.stringify(activeSlide.elements)) as WpsSlideElement[]).map(
+            (el) => ({ ...el, id: `${el.id}-c` }),
+          )
         : undefined,
     };
     const next = [
@@ -1795,14 +1944,14 @@ export default function WpsPptViewer({
       copy,
       ...slides.slice(currentIdx + 1),
     ];
-    commitSlides(next);
+    commitSlides(next, true);
     setCurrentIdx(currentIdx + 1);
   };
 
   const handleDeleteSlide = () => {
     if (slides.length <= 1) return;
     const next = slides.filter((_, idx) => idx !== currentIdx);
-    commitSlides(next);
+    commitSlides(next, true);
     setCurrentIdx((i) => Math.max(0, Math.min(next.length - 1, i)));
     setSelectedElementId(null);
     activeFieldKeyRef.current = null;
@@ -1815,7 +1964,7 @@ export default function WpsPptViewer({
     const next = [...slides];
     const [moved] = next.splice(currentIdx, 1);
     next.splice(target, 0, moved);
-    commitSlides(next);
+    commitSlides(next, true);
     setCurrentIdx(target);
   };
 
@@ -1844,30 +1993,35 @@ export default function WpsPptViewer({
         },
       ],
     };
-    updateActiveSlide((prev) => ({
-      ...prev,
-      elements: [...(prev.elements || []), newBox],
-    }));
+    updateActiveSlide(
+      (prev) => ({
+        ...prev,
+        elements: [...(prev.elements || []), newBox],
+      }),
+      true,
+    );
     setSelectedElementId(id);
   };
 
   const handleAddStructuredTable = () => {
-    updateActiveSlide((prev) =>
-      prev.table
-        ? {
-            ...prev,
-            table: {
-              ...prev.table,
-              rows: [...prev.table.rows, prev.table.headers.map(() => 'Dato')],
+    updateActiveSlide(
+      (prev) =>
+        prev.table
+          ? {
+              ...prev,
+              table: {
+                ...prev.table,
+                rows: [...prev.table.rows, prev.table.headers.map(() => 'Dato')],
+              },
+            }
+          : {
+              ...prev,
+              table: {
+                headers: ['Elemento', 'Valor'],
+                rows: [['Métrica 1', '100%']],
+              },
             },
-          }
-        : {
-            ...prev,
-            table: {
-              headers: ['Elemento', 'Valor'],
-              rows: [['Métrica 1', '100%']],
-            },
-          },
+      true,
     );
   };
 
@@ -1932,6 +2086,38 @@ export default function WpsPptViewer({
   const exportSlidesHtml = () => {
     const body = slides
       .map((s) => {
+        if (s.elements && s.elements.length > 0) {
+          const elementsHtml = [...s.elements]
+            .sort((a, b) => a.zIndex - b.zIndex)
+            .map((el) => {
+              if (el.type === 'text') return slideTextElementToHtml(el);
+              if (el.type === 'image') {
+                return `<p><img src="${el.src}" alt="${escapeHtml(el.alt || 'Imagen')}" style="max-width:100%;height:auto;" /></p>`;
+              }
+              if (el.type === 'table') {
+                const ths = el.headers.map((h) => `<th style="border:1px solid #cbd5e1;padding:6px;">${escapeHtml(h)}</th>`).join('');
+                const trs = el.rows
+                  .map((r) => `<tr>${r.map((c) => `<td style="border:1px solid #cbd5e1;padding:6px;">${escapeHtml(c)}</td>`).join('')}</tr>`)
+                  .join('');
+                return `<table style="width:100%;border-collapse:collapse;margin:12px 0;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+              }
+              if (el.type === 'diagram') {
+                return `<p>${el.items.map((item) => escapeHtml(item)).join(' · ')}</p>`;
+              }
+              if (el.type === 'chart') {
+                const pts = el.series[0]?.points.map((p) => `${escapeHtml(p.label)}: ${p.value}`).join(' | ') || '';
+                return `<p><strong>${escapeHtml(el.title || 'Gráfico')}</strong>${pts ? ` — ${pts}` : ''}</p>`;
+              }
+              return '';
+            })
+            .join('');
+          return `<section style="border:1px solid #cbd5e1;border-radius:12px;padding:32px;margin-bottom:24px;">
+              <div style="font-size:12px;color:#ea580c;font-weight:bold;">Diapositiva ${s.index}</div>
+              ${elementsHtml}
+              ${s.notes ? `<p style="color:#64748b;font-size:13px;"><strong>Notas:</strong> ${escapeHtml(s.notes)}</p>` : ''}
+            </section>`;
+        }
+
         const titlePart =
           s.titleHtml !== undefined ? s.titleHtml : `<h2>${escapeHtml(s.title)}</h2>`;
         const subtitlePart =
@@ -1944,11 +2130,15 @@ export default function WpsPptViewer({
           s.bodyHtml !== undefined
             ? s.bodyHtml
             : `<ul>${s.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
+        const tablePart = s.table
+          ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;"><thead><tr>${s.table.headers.map((h) => `<th style="border:1px solid #cbd5e1;padding:6px;">${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${s.table.rows.map((r) => `<tr>${r.map((c) => `<td style="border:1px solid #cbd5e1;padding:6px;">${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+          : '';
         return `<section style="border:1px solid #cbd5e1;border-radius:12px;padding:32px;margin-bottom:24px;">
             <div style="font-size:12px;color:#ea580c;font-weight:bold;">Diapositiva ${s.index}</div>
             ${titlePart}
             ${subtitlePart}
             ${bodyPart}
+            ${tablePart}
             ${s.notes ? `<p style="color:#64748b;font-size:13px;"><strong>Notas:</strong> ${escapeHtml(s.notes)}</p>` : ''}
           </section>`;
       })
@@ -1961,7 +2151,7 @@ export default function WpsPptViewer({
     a.href = url;
     a.download = `${doc.title.replace(/[^\w\dáéíóúñÁÉÍÓÚÑ\-_ ]+/g, '').trim() || 'presentacion'}.html`;
     a.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
   };
 
   if (presentationMode) {
@@ -2101,65 +2291,76 @@ export default function WpsPptViewer({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-          {editMode && onUpdateDocument && (
+          {onUpdateDocument && (editMode || history.canUndo || history.canRedo) && (
             <>
               <button
                 type="button"
+                disabled={!history.canUndo}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runWordCommand('undo')}
+                onClick={handleUndo}
                 aria-label="Deshacer"
-                className="flex min-h-[44px] min-w-[38px] sm:min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Deshacer cambio"
+                className="flex min-h-[44px] min-w-[38px] sm:min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 <Undo2 className="h-4 w-4" />
               </button>
               <button
                 type="button"
+                disabled={!history.canRedo}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runWordCommand('redo')}
+                onClick={handleRedo}
                 aria-label="Rehacer"
-                className="hidden min-h-[44px] min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Rehacer cambio"
+                className="hidden min-h-[44px] min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-35 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 <Redo2 className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                onClick={handleJumpToNextSpellError}
-                title={
-                  spellCheckEnabled
-                    ? flattenedSpellErrors.length > 0
-                      ? `${flattenedSpellErrors.length} error(es) ortográfico(s) — Clic para revisar`
-                      : 'Sin errores ortográficos'
-                    : 'Activar corrector ortográfico'
-                }
-                aria-label="Revisar ortografía"
-                className={`inline-flex min-h-[40px] items-center gap-1 rounded-xl px-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                  !spellCheckEnabled
-                    ? 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'
-                    : flattenedSpellErrors.length > 0
-                      ? 'bg-red-50 text-[#EA3D2F] hover:bg-red-100 dark:bg-red-950/50 dark:text-red-400 dark:hover:bg-red-950/80'
-                      : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
-                }`}
-              >
-                <SpellCheck className="h-4 w-4 shrink-0" />
-                <span className="hidden md:inline font-mono tabular-nums">
-                  {!spellCheckEnabled
-                    ? 'Off'
-                    : flattenedSpellErrors.length > 0
-                      ? `${flattenedSpellErrors.length}`
-                      : 'OK'}
-                </span>
-              </button>
             </>
+          )}
+
+          {editMode && onUpdateDocument && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleJumpToNextSpellError}
+              title={
+                spellCheckEnabled
+                  ? flattenedSpellErrors.length > 0
+                    ? `${flattenedSpellErrors.length} error(es) ortográfico(s) — Clic para revisar`
+                    : 'Sin errores ortográficos'
+                  : 'Activar corrector ortográfico'
+              }
+              aria-label="Revisar ortografía"
+              className={`inline-flex min-h-[40px] items-center gap-1 rounded-xl px-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                !spellCheckEnabled
+                  ? 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'
+                  : flattenedSpellErrors.length > 0
+                    ? 'bg-red-50 text-[#EA3D2F] hover:bg-red-100 dark:bg-red-950/50 dark:text-red-400 dark:hover:bg-red-950/80'
+                    : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
+              }`}
+            >
+              <SpellCheck className="h-4 w-4 shrink-0" />
+              <span className="hidden md:inline font-mono tabular-nums">
+                {!spellCheckEnabled
+                  ? 'Off'
+                  : flattenedSpellErrors.length > 0
+                    ? `${flattenedSpellErrors.length}`
+                    : 'OK'}
+              </span>
+            </button>
           )}
 
           {onUpdateDocument && (
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (!editMode && viewMode === 'reading') {
                   setViewMode('slide');
                 }
                 if (editMode) {
+                  history.commitPending();
+                  hideSoftKeyboard();
                   setDrawerOpen(false);
                 }
                 setSpellMenu(null);
@@ -2289,11 +2490,14 @@ export default function WpsPptViewer({
                   <button
                     type="button"
                     onClick={() =>
-                      updateActiveSlide((prev) => ({
-                        ...prev,
-                        subtitle: 'Subtítulo de la diapositiva',
-                        subtitleHtml: '<p>Subtítulo de la diapositiva</p>',
-                      }))
+                      updateActiveSlide(
+                        (prev) => ({
+                          ...prev,
+                          subtitle: 'Subtítulo de la diapositiva',
+                          subtitleHtml: '<p>Subtítulo de la diapositiva</p>',
+                        }),
+                        true,
+                      )
                     }
                     className="inline-flex min-h-[34px] shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
@@ -2327,10 +2531,13 @@ export default function WpsPptViewer({
                     type="button"
                     onClick={() => {
                       const targetId = selectedTextElement.id;
-                      updateActiveSlide((prev) => ({
-                        ...prev,
-                        elements: prev.elements?.filter((e) => e.id !== targetId),
-                      }));
+                      updateActiveSlide(
+                        (prev) => ({
+                          ...prev,
+                          elements: prev.elements?.filter((e) => e.id !== targetId),
+                        }),
+                        true,
+                      );
                       setSelectedElementId(null);
                     }}
                     className="inline-flex min-h-[34px] shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400"

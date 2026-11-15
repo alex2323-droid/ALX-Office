@@ -17,11 +17,21 @@ import {
   loadInitialDocumentsSync,
   saveCachedDocuments,
 } from './lib/offlineDocStore';
+import { testFirestoreConnection } from './lib/firebase';
+import {
+  deleteCloudDocument,
+  ensureUserProfile,
+  sanitizeFirestoreId,
+  subscribeUserDocuments,
+  updateUserThemeInCloud,
+  upsertCloudDocument,
+} from './lib/firebaseSync';
 import {
   getAccessToken,
   googleSignIn,
   initAuth,
   logout,
+  subscribeFirebaseAuth,
 } from './lib/googleAuth';
 import {
   downloadPickedDriveFile,
@@ -45,7 +55,7 @@ function downloadBlob(filename: string, content: string, mimeType: string) {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 export default function App() {
@@ -74,6 +84,15 @@ export default function App() {
     text: string;
   } | null>(null);
 
+  // Firebase Auth & Firestore Cloud Sync state
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState(false);
+  const [cloudProfileReady, setCloudProfileReady] = useState(false);
+  const cloudDocIdsRef = useRef<Set<string>>(new Set());
+  const cloudSeededUidRef = useRef<string | null>(null);
+  const syncTimersRef = useRef<Map<string, number>>(new Map());
+  const documentsRef = useRef<WpsDocument[]>(documents);
+
   // Google Workspace Auth & Picker state
   const [needsAuth, setNeedsAuth] = useState(true);
   const [googleUser, setGoogleUser] = useState<User | null>(null);
@@ -85,6 +104,20 @@ export default function App() {
   const [isUploadingDrive, setIsUploadingDrive] = useState(false);
 
   useEffect(() => {
+    documentsRef.current = documents;
+  }, [documents]);
+
+  useEffect(() => {
+    void testFirestoreConnection();
+    const unsubFirebase = subscribeFirebaseAuth((user) => {
+      setFirebaseUser(user);
+      setIsFirebaseAuthReady(true);
+      if (!user) {
+        setCloudProfileReady(false);
+        cloudDocIdsRef.current.clear();
+        cloudSeededUidRef.current = null;
+      }
+    });
     const unsubscribe = initAuth(
       (user) => {
         setGoogleUser(user);
@@ -95,8 +128,95 @@ export default function App() {
         setNeedsAuth(true);
       },
     );
-    return () => unsubscribe();
+    return () => {
+      unsubFirebase();
+      unsubscribe();
+    };
   }, []);
+
+  const reportCloudSyncError = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('Quota exceeded')) {
+      setStatusNotice({
+        kind: 'error',
+        text: 'Se alcanzó el límite diario de Firebase Firestore. La cuota se restablece mañana; tus documentos locales siguen guardados.',
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!isFirebaseAuthReady || !firebaseUser || !firebaseUser.emailVerified || !isOnline) {
+      return;
+    }
+
+    let cancelled = false;
+    let unsubscribeDocs: (() => void) | null = null;
+    const uid = firebaseUser.uid;
+    const initialTheme: 'dark' | 'light' = darkMode ? 'dark' : 'light';
+
+    void ensureUserProfile(firebaseUser, initialTheme)
+      .then((remoteTheme) => {
+        if (cancelled) return;
+        setCloudProfileReady(true);
+        setDarkMode(remoteTheme === 'dark');
+
+        unsubscribeDocs = subscribeUserDocuments(
+          uid,
+          (remoteDocs) => {
+            if (cancelled) return;
+            const nextIds = new Set(remoteDocs.map((d) => sanitizeFirestoreId(d.id)));
+            cloudDocIdsRef.current = nextIds;
+
+            if (remoteDocs.length === 0) {
+              if (cloudSeededUidRef.current !== uid && documentsRef.current.length > 0) {
+                cloudSeededUidRef.current = uid;
+                for (const localDoc of documentsRef.current) {
+                  void upsertCloudDocument(uid, localDoc, false)
+                    .then(() => {
+                      cloudDocIdsRef.current.add(sanitizeFirestoreId(localDoc.id));
+                    })
+                    .catch(reportCloudSyncError);
+                }
+              }
+              return;
+            }
+
+            cloudSeededUidRef.current = uid;
+            setDocuments((prev) => {
+              const localById = new Map(prev.map((d) => [sanitizeFirestoreId(d.id), d]));
+              const merged: WpsDocument[] = remoteDocs.map((remoteDoc) => {
+                const localMatch = localById.get(sanitizeFirestoreId(remoteDoc.id));
+                return {
+                  ...remoteDoc,
+                  // Retain full local PDF blob in IndexedDB if omitted from Firestore 1MB limit
+                  pdfBase64: remoteDoc.pdfBase64 ?? localMatch?.pdfBase64,
+                };
+              });
+              const remoteIdSet = new Set(remoteDocs.map((d) => sanitizeFirestoreId(d.id)));
+              for (const localDoc of prev) {
+                if (!remoteIdSet.has(sanitizeFirestoreId(localDoc.id)) && docsDirtyRef.current) {
+                  merged.push(localDoc);
+                }
+              }
+              return merged;
+            });
+          },
+          reportCloudSyncError,
+        );
+      })
+      .catch(reportCloudSyncError);
+
+    return () => {
+      cancelled = true;
+      if (unsubscribeDocs) {
+        unsubscribeDocs();
+      }
+      for (const timer of syncTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      syncTimersRef.current.clear();
+    };
+  }, [isFirebaseAuthReady, firebaseUser, isOnline]);
 
   useEffect(() => {
     let active = true;
@@ -162,6 +282,36 @@ export default function App() {
 
   const activeDoc = documents.find((d) => d.id === activeDocId) ?? null;
 
+  const scheduleCloudUpsert = (docToSync: WpsDocument, immediate = false) => {
+    if (!firebaseUser || !firebaseUser.emailVerified || !cloudProfileReady || !isOnline) {
+      return;
+    }
+    const uid = firebaseUser.uid;
+    const key = sanitizeFirestoreId(docToSync.id);
+    const existingTimer = syncTimersRef.current.get(key);
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+      syncTimersRef.current.delete(key);
+    }
+
+    const execute = () => {
+      syncTimersRef.current.delete(key);
+      const existsInCloud = cloudDocIdsRef.current.has(key);
+      void upsertCloudDocument(uid, docToSync, existsInCloud)
+        .then(() => {
+          cloudDocIdsRef.current.add(key);
+        })
+        .catch(reportCloudSyncError);
+    };
+
+    if (immediate) {
+      execute();
+    } else {
+      const timer = window.setTimeout(execute, 650);
+      syncTimersRef.current.set(key, timer);
+    }
+  };
+
   const handleCreateFromTemplate = (template: WpsTemplate) => {
     docsDirtyRef.current = true;
     const id = `doc-${Date.now()}`;
@@ -178,23 +328,36 @@ export default function App() {
       contentHtml: template.contentHtml,
       comments: [],
     };
-    setDocuments((prev) => [created, ...prev]);
+    const nextDocs = [created, ...documentsRef.current];
+    documentsRef.current = nextDocs;
+    setDocuments(nextDocs);
     setActiveDocId(id);
+    scheduleCloudUpsert(created, true);
   };
 
   const handleUpdateDocument = (docId: string, patch: Partial<WpsDocument>) => {
     docsDirtyRef.current = true;
     setSyncStatus('saving');
-    setDocuments((prev) =>
-      prev.map((d) => (d.id === docId ? { ...d, ...patch } : d)),
-    );
+    const current = documentsRef.current.find((d) => d.id === docId);
+    const nextDoc = current ? { ...current, ...patch } : null;
+    if (nextDoc) {
+      const nextDocs = documentsRef.current.map((d) => (d.id === docId ? nextDoc : d));
+      documentsRef.current = nextDocs;
+      setDocuments(nextDocs);
+      scheduleCloudUpsert(nextDoc, false);
+    }
   };
 
   const handleToggleStar = (docId: string) => {
     docsDirtyRef.current = true;
-    setDocuments((prev) =>
-      prev.map((d) => (d.id === docId ? { ...d, starred: !d.starred } : d)),
-    );
+    const current = documentsRef.current.find((d) => d.id === docId);
+    const nextDoc = current ? { ...current, starred: !current.starred } : null;
+    if (nextDoc) {
+      const nextDocs = documentsRef.current.map((d) => (d.id === docId ? nextDoc : d));
+      documentsRef.current = nextDocs;
+      setDocuments(nextDocs);
+      scheduleCloudUpsert(nextDoc, true);
+    }
   };
 
   const handleRenameDocument = (docId: string, newTitle: string) => {
@@ -202,26 +365,50 @@ export default function App() {
   };
 
   const handleDuplicateDocument = (docId: string) => {
-    const source = documents.find((d) => d.id === docId);
+    const source = documentsRef.current.find((d) => d.id === docId);
     if (!source) return;
     docsDirtyRef.current = true;
+    const clonedSlides = source.slides
+      ? (JSON.parse(JSON.stringify(source.slides)) as WpsDocument['slides'])
+      : undefined;
     const copy: WpsDocument = {
       ...source,
       id: `doc-${Date.now()}`,
       title: `${source.title} (Copia)`,
       starred: false,
       updatedAt: 'Ahora mismo',
-      comments: [...source.comments],
-      slides: source.slides ? source.slides.map((s) => ({ ...s })) : undefined,
+      comments: source.comments.map((c) => ({ ...c })),
+      slides: clonedSlides,
     };
-    setDocuments((prev) => [copy, ...prev]);
+    const nextDocs = [copy, ...documentsRef.current];
+    documentsRef.current = nextDocs;
+    setDocuments(nextDocs);
+    scheduleCloudUpsert(copy, true);
   };
 
   const handleDeleteDocument = (docId: string) => {
     docsDirtyRef.current = true;
-    setDocuments((prev) => prev.filter((d) => d.id !== docId));
+    const nextDocs = documentsRef.current.filter((d) => d.id !== docId);
+    documentsRef.current = nextDocs;
+    setDocuments(nextDocs);
     if (activeDocId === docId) {
       setActiveDocId(null);
+    }
+    const key = sanitizeFirestoreId(docId);
+    const pendingTimer = syncTimersRef.current.get(key);
+    if (pendingTimer !== undefined) {
+      window.clearTimeout(pendingTimer);
+      syncTimersRef.current.delete(key);
+    }
+    if (
+      firebaseUser &&
+      firebaseUser.emailVerified &&
+      cloudProfileReady &&
+      isOnline &&
+      cloudDocIdsRef.current.has(key)
+    ) {
+      cloudDocIdsRef.current.delete(key);
+      void deleteCloudDocument(firebaseUser.uid, key).catch(reportCloudSyncError);
     }
   };
 
@@ -270,8 +457,11 @@ export default function App() {
     try {
       const imported = await parseUploadedOfficeFile(file);
       docsDirtyRef.current = true;
-      setDocuments((prev) => [imported, ...prev]);
+      const nextDocs = [imported, ...documentsRef.current];
+      documentsRef.current = nextDocs;
+      setDocuments(nextDocs);
       setActiveDocId(imported.id);
+      scheduleCloudUpsert(imported, true);
     } catch (err) {
       setStatusNotice({
         kind: 'error',
@@ -359,8 +549,11 @@ export default function App() {
       const imported = await parseUploadedOfficeFile(driveFile);
       imported.folder = 'Google Drive';
       docsDirtyRef.current = true;
-      setDocuments((prev) => [imported, ...prev]);
+      const nextDocs = [imported, ...documentsRef.current];
+      documentsRef.current = nextDocs;
+      setDocuments(nextDocs);
       setActiveDocId(imported.id);
+      scheduleCloudUpsert(imported, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al abrir archivo de Drive.';
       if (msg.includes('401')) {
@@ -552,7 +745,18 @@ export default function App() {
         onExportDocument={handleExportDocument}
         onImportFile={handleImportFile}
         darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode((prev) => !prev)}
+        onToggleDarkMode={() => {
+          setDarkMode((prev) => {
+            const next = !prev;
+            if (firebaseUser && firebaseUser.emailVerified && cloudProfileReady && isOnline) {
+              void updateUserThemeInCloud(
+                firebaseUser.uid,
+                next ? 'dark' : 'light',
+              ).catch(reportCloudSyncError);
+            }
+            return next;
+          });
+        }}
         needsGoogleAuth={needsAuth}
         googleUserEmail={googleUser?.email || googleUser?.displayName || null}
         isGoogleLoggingIn={isLoggingIn}

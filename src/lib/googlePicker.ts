@@ -209,7 +209,11 @@ export async function uploadDocumentCopyToDrive(
     title.replace(/[^\w\dáéíóúñÁÉÍÓÚÑ\-_ ]+/g, '').trim() || 'Documento WPS';
   const fileName = `${safeName}.doc`;
 
-  const wordDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title></head><body>${contentHtml}</body></html>`;
+  const safeHtmlTitle = title
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const wordDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${safeHtmlTitle}</title></head><body>${contentHtml}</body></html>`;
 
   const metadata = {
     name: fileName,

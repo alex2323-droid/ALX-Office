@@ -1,0 +1,149 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil privado y preferencias de tema del usuario autenticado en ALX Office.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Identificador único de Firebase Auth del usuario."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Nombre visible de la cuenta."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200,
+          "description": "Correo electrónico de la cuenta de Google."
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["dark", "light"],
+          "description": "Preferencia de tema visual de ALX Office."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Marca temporal del servidor al crear el perfil."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Marca temporal del servidor al actualizar el perfil."
+        }
+      },
+      "required": ["uid", "theme", "createdAt", "updatedAt"]
+    },
+    "CloudDocument": {
+      "title": "CloudDocument",
+      "description": "Documento o presentación de ALX Office sincronizado en Firestore por propietario.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Identificador del documento."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID del usuario propietario del documento."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Título del documento."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["DOCX", "DOC", "PDF", "PPTX", "PPT", "TXT"],
+          "description": "Formato documental soportado por ALX Office."
+        },
+        "folder": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Carpeta o categoría del documento."
+        },
+        "starred": {
+          "type": "boolean",
+          "description": "Indica si el documento está marcado como destacado."
+        },
+        "updatedLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Etiqueta legible de la última actualización."
+        },
+        "contentHtml": {
+          "type": "string",
+          "maxLength": 750000,
+          "description": "Contenido HTML enriquecido del documento."
+        },
+        "pdfBase64": {
+          "type": "string",
+          "maxLength": 750000,
+          "description": "Contenido PDF codificado opcional cuando cabe bajo el límite de Firestore."
+        },
+        "slides": {
+          "type": "array",
+          "description": "Lista nativa de diapositivas para archivos PPT/PPTX."
+        },
+        "comments": {
+          "type": "array",
+          "description": "Lista nativa de comentarios de revisión."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Marca temporal del servidor al crear el documento."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Marca temporal del servidor de la última modificación."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "title",
+        "format",
+        "folder",
+        "starred",
+        "updatedLabel",
+        "contentHtml",
+        "comments",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Perfil privado y preferencias de tema por usuario autenticado."
+    },
+    "/users/{userId}/documents/{docId}": {
+      "schema": {
+        "$ref": "#/entities/CloudDocument"
+      },
+      "description": "Documentos sincronizados de ALX Office pertenecientes exclusivamente a ese usuario."
+    }
+  }
+}

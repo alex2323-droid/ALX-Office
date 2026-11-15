@@ -17,6 +17,15 @@ import {
   X,
 } from 'lucide-react';
 import { WpsComment, WpsDocument, computeDocStats } from '../data/wpsDocuments';
+import { useDocumentHistory } from '../hooks/useDocumentHistory';
+import {
+  createChecklistHtml,
+  hideSoftKeyboard,
+  isRangeInsideElement,
+  prepareSelectionForBlockInsert,
+  runCommandWithoutKeyboardPopup,
+  syncCheckboxAttribute,
+} from '../lib/editorDom';
 import {
   SpellErrorMatch,
   getSpellingSuggestions,
@@ -38,6 +47,11 @@ interface WpsEditorViewProps {
   onExportDocument: (doc: WpsDocument, kind: 'doc' | 'html' | 'txt') => void;
 }
 
+interface WordHistorySnapshot {
+  contentHtml: string;
+  title: string;
+}
+
 export default function WpsEditorView({
   document: doc,
   syncStatus = 'saved',
@@ -47,10 +61,21 @@ export default function WpsEditorView({
 }: WpsEditorViewProps) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const spellScanTimerRef = useRef<number | null>(null);
+  const lastAppliedHtmlRef = useRef<string>(doc.contentHtml);
 
-  const [isEditing, setIsEditing] = useState(true);
+  const history = useDocumentHistory<WordHistorySnapshot>(
+    { contentHtml: doc.contentHtml, title: doc.title },
+    doc.id,
+    {
+      equals: (a, b) => a.contentHtml === b.contentHtml && a.title === b.title,
+    },
+  );
+
+  // Start in clean view mode so tapping/scrolling on mobile never summons the keyboard prematurely
+  const [isEditing, setIsEditing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<ToolDrawerTab>('inicio');
 
@@ -95,7 +120,7 @@ export default function WpsEditorView({
 
   const computeUnderlineRects = useCallback((errors: SpellErrorMatch[]) => {
     const container = paperRef.current;
-    if (!container) {
+    if (!container || errors.length === 0) {
       setUnderlineRects([]);
       return;
     }
@@ -137,13 +162,17 @@ export default function WpsEditorView({
     spellScanTimerRef.current = window.setTimeout(() => {
       spellScanTimerRef.current = null;
       runSpellScan();
-    }, 140);
+    }, 150);
   }, [runSpellScan]);
 
-  // Sync contentHtml when opening a different document
+  // Reset UI & sync DOM when switching documents
   useEffect(() => {
+    setIsEditing(false);
+    setDrawerOpen(false);
     setIgnoredWords(new Set());
     setSpellMenu(null);
+    savedRangeRef.current = null;
+    lastAppliedHtmlRef.current = doc.contentHtml;
     if (editorRef.current && editorRef.current.innerHTML !== doc.contentHtml) {
       editorRef.current.innerHTML = doc.contentHtml;
     }
@@ -151,7 +180,25 @@ export default function WpsEditorView({
       runSpellScan();
     });
     return () => window.cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.id]);
+
+  // Keep DOM and history synchronized when doc updates externally (e.g. cloud sync)
+  useEffect(() => {
+    history.syncExternal({ contentHtml: doc.contentHtml, title: doc.title });
+    const el = editorRef.current;
+    if (!el) return;
+    if (
+      doc.contentHtml !== lastAppliedHtmlRef.current &&
+      el.innerHTML !== doc.contentHtml &&
+      window.document.activeElement !== el
+    ) {
+      lastAppliedHtmlRef.current = doc.contentHtml;
+      savedRangeRef.current = null;
+      el.innerHTML = doc.contentHtml;
+      window.requestAnimationFrame(() => runSpellScan());
+    }
+  }, [doc.contentHtml, doc.title, history, runSpellScan]);
 
   // Re-scan when spellcheck settings or dictionaries change
   useEffect(() => {
@@ -161,26 +208,35 @@ export default function WpsEditorView({
     return () => window.cancelAnimationFrame(frame);
   }, [runSpellScan]);
 
-  // Recompute underline positions on typography/layout/zoom changes or container resize
+  // Recompute underline positions on typography/layout/zoom changes
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       computeUnderlineRects(spellErrors);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [fontFamily, zoomPercent, lineSpacing, layoutMode, spellErrors, computeUnderlineRects]);
+  }, [fontFamily, zoomPercent, lineSpacing, layoutMode, isEditing, spellErrors, computeUnderlineRects]);
 
+  // Recompute underline positions on resize, scroll, or mobile visualViewport changes
   useEffect(() => {
     const el = editorRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      computeUnderlineRects(spellErrors);
-    });
-    observer.observe(el);
-    const handleResize = () => computeUnderlineRects(spellErrors);
-    window.addEventListener('resize', handleResize);
+    const scrollEl = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleReposition = () => computeUnderlineRects(spellErrors);
+    const observer =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(handleReposition)
+        : null;
+    observer?.observe(el);
+    window.addEventListener('resize', handleReposition);
+    scrollEl?.addEventListener('scroll', handleReposition, { passive: true });
+    window.visualViewport?.addEventListener('resize', handleReposition);
+
     return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', handleResize);
+      observer?.disconnect();
+      window.removeEventListener('resize', handleReposition);
+      scrollEl?.removeEventListener('scroll', handleReposition);
+      window.visualViewport?.removeEventListener('resize', handleReposition);
     };
   }, [spellErrors, computeUnderlineRects]);
 
@@ -192,11 +248,18 @@ export default function WpsEditorView({
     };
   }, []);
 
-  const syncFormatState = () => {
+  const syncFormatState = useCallback(() => {
     try {
       const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
-        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        editorRef.current?.contains(sel.anchorNode)
+      ) {
+        const range = sel.getRangeAt(0);
+        if (isRangeInsideElement(range, editorRef.current)) {
+          savedRangeRef.current = range.cloneRange();
+        }
       }
       setActiveFormats({
         bold: window.document.queryCommandState('bold'),
@@ -209,51 +272,117 @@ export default function WpsEditorView({
     } catch {
       // Ignore unsupported queryCommandState calls
     }
-  };
+  }, []);
 
-  const restoreSelection = () => {
-    editorRef.current?.focus();
-    const sel = window.getSelection();
-    if (sel && savedRangeRef.current) {
-      sel.removeAllRanges();
-      sel.addRange(savedRangeRef.current);
-    }
-  };
+  const persistEditorHtml = useCallback(
+    (immediate = false): string | undefined => {
+      if (!editorRef.current) return undefined;
+      // Ensure all checkbox attributes match live checked property before serializing
+      editorRef.current
+        .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+        .forEach(syncCheckboxAttribute);
 
-  const persistEditorHtml = (): string | undefined => {
-    if (!editorRef.current) return undefined;
-    const html = editorRef.current.innerHTML;
-    onUpdateDocument({
-      contentHtml: html,
-      updatedAt: 'Ahora mismo',
-    });
-    scheduleSpellScan();
-    return html;
-  };
+      const html = editorRef.current.innerHTML;
+      lastAppliedHtmlRef.current = html;
+      const snapshot: WordHistorySnapshot = {
+        contentHtml: html,
+        title: doc.title,
+      };
+      if (immediate) {
+        history.pushImmediate(snapshot);
+      } else {
+        history.recordDebounced(snapshot);
+      }
+      onUpdateDocument({
+        contentHtml: html,
+        updatedAt: 'Ahora mismo',
+      });
+      scheduleSpellScan();
+      return html;
+    },
+    [doc.title, history, onUpdateDocument, scheduleSpellScan],
+  );
+
+  const applyHistorySnapshot = useCallback(
+    (snapshot: WordHistorySnapshot | null) => {
+      if (!snapshot) return;
+      setSpellMenu(null);
+      savedRangeRef.current = null;
+      lastAppliedHtmlRef.current = snapshot.contentHtml;
+      if (editorRef.current && editorRef.current.innerHTML !== snapshot.contentHtml) {
+        editorRef.current.innerHTML = snapshot.contentHtml;
+      }
+      onUpdateDocument({
+        contentHtml: snapshot.contentHtml,
+        title: snapshot.title,
+        updatedAt: 'Ahora mismo',
+      });
+      syncFormatState();
+      window.requestAnimationFrame(() => runSpellScan());
+    },
+    [onUpdateDocument, runSpellScan, syncFormatState],
+  );
+
+  const handleUndo = useCallback(() => {
+    const prev = history.undo();
+    applyHistorySnapshot(prev);
+  }, [applyHistorySnapshot, history]);
+
+  const handleRedo = useCallback(() => {
+    const next = history.redo();
+    applyHistorySnapshot(next);
+  }, [applyHistorySnapshot, history]);
 
   const runFormatCommand = (command: string, value?: string) => {
+    if (command === 'undo') {
+      handleUndo();
+      return;
+    }
+    if (command === 'redo') {
+      handleRedo();
+      return;
+    }
+    const el = editorRef.current;
+    if (!el) return;
     if (!isEditing) setIsEditing(true);
-    restoreSelection();
-    window.document.execCommand(command, false, value);
-    persistEditorHtml();
-    syncFormatState();
+
+    window.requestAnimationFrame(() => {
+      runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+        window.document.execCommand(command, false, value);
+      });
+      persistEditorHtml(true);
+      syncFormatState();
+    });
   };
 
   const insertHtmlAtCursor = (html: string) => {
+    const el = editorRef.current;
+    if (!el) return;
     if (!isEditing) setIsEditing(true);
-    restoreSelection();
-    window.document.execCommand('insertHTML', false, html);
-    persistEditorHtml();
-    syncFormatState();
+
+    const isBlockInsertion = /<(table|hr|p|h[1-3]|ul|ol|blockquote)\b/i.test(html);
+    window.requestAnimationFrame(() => {
+      runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+        if (isBlockInsertion) {
+          prepareSelectionForBlockInsert(el, savedRangeRef.current);
+        }
+        window.document.execCommand('insertHTML', false, html);
+      });
+      persistEditorHtml(true);
+      syncFormatState();
+    });
   };
 
   // Find & Replace counting + replacement
   const findMatchesCount = useMemo(() => {
     const needle = findTerm.trim();
     if (!needle) return 0;
-    const parser = new DOMParser();
-    const parsed = parser.parseFromString(doc.contentHtml, 'text/html');
-    const text = parsed.body.textContent || '';
+    let text = editorRef.current?.textContent ?? '';
+    if (!text && doc.contentHtml) {
+      const parser = new DOMParser();
+      const parsed = parser.parseFromString(doc.contentHtml, 'text/html');
+      text = parsed.body.textContent || '';
+    }
     const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const matches = text.match(new RegExp(escaped, 'gi'));
     return matches ? matches.length : 0;
@@ -286,8 +415,10 @@ export default function WpsEditorView({
       }
     }
 
-    persistEditorHtml();
-    runSpellScan();
+    if (replacedCount > 0) {
+      persistEditorHtml(true);
+      runSpellScan();
+    }
     setFindFeedback(
       replacedCount > 0
         ? `Se reemplazaron ${replacedCount} coincidencia(s).`
@@ -338,14 +469,91 @@ export default function WpsEditorView({
   };
 
   const handleEditorClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Handle interactive checklist checkboxes without summoning keyboard
+    const target = e.target;
+    if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+      syncCheckboxAttribute(target);
+      hideSoftKeyboard();
+      persistEditorHtml(true);
+      return;
+    }
+
     if (!spellCheckEnabled) return;
     const isCoarsePointer =
       typeof window !== 'undefined' &&
       window.matchMedia('(pointer: coarse)').matches;
     if (!isCoarsePointer && isEditing) return;
+
     const matched = findSpellErrorAtPoint(e.clientX, e.clientY);
     if (matched) {
+      e.preventDefault();
+      hideSoftKeyboard();
       openSpellMenuForError(matched, e.clientX, e.clientY + 8);
+    }
+  };
+
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Route Ctrl/Cmd+Z and Ctrl/Cmd+Y through unified document history
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+    }
+
+    // Keep checklist structure tidy when pressing Enter inside a checklist item
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !editorRef.current) return;
+      const anchor = sel.anchorNode;
+      const el =
+        anchor instanceof HTMLElement
+          ? anchor
+          : anchor?.parentElement ?? null;
+      const checklistP = el?.closest('p[data-checklist="true"]');
+      if (checklistP && editorRef.current.contains(checklistP)) {
+        e.preventDefault();
+        const textSpan = checklistP.querySelector('.wps-checklist-text');
+        const hasText = (textSpan?.textContent || '').trim().length > 0;
+        const wrapper = window.document.createElement('div');
+        if (!hasText) {
+          // Exit checklist into a clean standard paragraph
+          const normalP = window.document.createElement('p');
+          normalP.innerHTML = '<br />';
+          checklistP.replaceWith(normalP);
+          const range = window.document.createRange();
+          range.selectNodeContents(normalP);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          wrapper.innerHTML = createChecklistHtml('', false);
+          const newItem = wrapper.firstElementChild as HTMLElement | null;
+          if (newItem) {
+            const newTextSpan = newItem.querySelector('.wps-checklist-text');
+            if (newTextSpan) {
+              newTextSpan.innerHTML = '<br />';
+            }
+            checklistP.insertAdjacentElement('afterend', newItem);
+            const range = window.document.createRange();
+            if (newTextSpan) {
+              range.selectNodeContents(newTextSpan);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          }
+        }
+        persistEditorHtml(true);
+        syncFormatState();
+      }
     }
   };
 
@@ -360,6 +568,7 @@ export default function WpsEditorView({
       runSpellScan();
       return;
     }
+    hideSoftKeyboard();
     const rect = target.range.getBoundingClientRect();
     const parentEl = target.range.startContainer.parentElement;
     parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -371,25 +580,23 @@ export default function WpsEditorView({
 
   const handleSelectSuggestion = (menu: SpellContextMenuState, replacement: string) => {
     setSpellMenu(null);
-    if (!menu.range.startContainer.isConnected || !editorRef.current) return;
+    const el = editorRef.current;
+    if (!menu.range.startContainer.isConnected || !el) return;
 
-    if (!isEditing) {
-      setIsEditing(true);
-    }
-    editorRef.current.focus();
-    const sel = window.getSelection();
-    if (sel) {
-      sel.removeAllRanges();
-      sel.addRange(menu.range);
-    }
+    runCommandWithoutKeyboardPopup(el, menu.range, () => {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(menu.range);
+      }
+      const applied = window.document.execCommand('insertText', false, replacement);
+      if (!applied) {
+        menu.range.deleteContents();
+        menu.range.insertNode(window.document.createTextNode(replacement));
+      }
+    });
 
-    const applied = window.document.execCommand('insertText', false, replacement);
-    if (!applied) {
-      menu.range.deleteContents();
-      menu.range.insertNode(window.document.createTextNode(replacement));
-    }
-
-    persistEditorHtml();
+    persistEditorHtml(true);
     syncFormatState();
     window.requestAnimationFrame(() => runSpellScan());
   };
@@ -460,8 +667,9 @@ export default function WpsEditorView({
 
   const handleEnterPrintView = () => {
     if (isEditing) {
-      persistEditorHtml();
+      persistEditorHtml(true);
     }
+    hideSoftKeyboard();
     setDrawerOpen(false);
     setFindOpen(false);
     setSpellMenu(null);
@@ -480,13 +688,14 @@ export default function WpsEditorView({
         ? 'var(--font-mono)'
         : 'var(--font-sans)';
 
+  const showHistoryControls = isEditing || history.canUndo || history.canRedo;
+
   return (
     <div
       className={`wps-print-root flex min-h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100 ${
         printViewMode ? 'alx-print-view' : ''
       }`}
     >
-
       {/* Compact Sticky Top Editor Bar (52px) */}
       {printViewMode ? (
         <header className="no-print sticky top-0 z-30 flex h-[52px] items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-3 backdrop-blur-md sm:px-5 dark:border-slate-800 dark:bg-slate-900/95">
@@ -519,7 +728,8 @@ export default function WpsEditorView({
             <button
               type="button"
               onClick={() => {
-                persistEditorHtml();
+                if (isEditing) persistEditorHtml(true);
+                hideSoftKeyboard();
                 onBack();
               }}
               aria-label="Volver a documentos"
@@ -531,7 +741,14 @@ export default function WpsEditorView({
             <input
               type="text"
               value={doc.title}
-              onChange={(e) => onUpdateDocument({ title: e.target.value })}
+              onChange={(e) => {
+                const nextTitle = e.target.value;
+                history.recordDebounced({
+                  contentHtml: editorRef.current?.innerHTML ?? doc.contentHtml,
+                  title: nextTitle,
+                });
+                onUpdateDocument({ title: nextTitle, updatedAt: 'Ahora mismo' });
+              }}
               aria-label="Título del documento"
               className="min-w-[60px] flex-1 truncate rounded-lg bg-transparent px-2 py-1 font-display text-sm font-semibold text-slate-900 focus:bg-slate-100 focus:outline-none sm:text-base dark:text-slate-100 dark:focus:bg-slate-800"
             />
@@ -556,23 +773,27 @@ export default function WpsEditorView({
           </div>
 
           <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-            {isEditing && (
+            {showHistoryControls && (
               <>
                 <button
                   type="button"
+                  disabled={!history.canUndo}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => runFormatCommand('undo')}
+                  onClick={handleUndo}
                   aria-label="Deshacer"
-                  className="flex min-h-[44px] min-w-[40px] sm:min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Deshacer cambio"
+                  className="flex min-h-[44px] min-w-[40px] sm:min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   <Undo2 className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
+                  disabled={!history.canRedo}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => runFormatCommand('redo')}
+                  onClick={handleRedo}
                   aria-label="Rehacer"
-                  className="hidden min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Rehacer cambio"
+                  className="hidden min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-35 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   <Redo2 className="h-4 w-4" />
                 </button>
@@ -581,6 +802,7 @@ export default function WpsEditorView({
 
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleJumpToNextSpellError}
               title={
                 spellCheckEnabled
@@ -610,7 +832,11 @@ export default function WpsEditorView({
 
             <button
               type="button"
-              onClick={() => setFindOpen((v) => !v)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (!findOpen) hideSoftKeyboard();
+                setFindOpen((v) => !v);
+              }}
               aria-label="Buscar y reemplazar"
               className={`flex min-h-[44px] min-w-[40px] sm:min-w-[44px] items-center justify-center rounded-xl transition-colors ${
                 findOpen
@@ -634,11 +860,15 @@ export default function WpsEditorView({
 
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (isEditing) {
-                  persistEditorHtml();
+                  persistEditorHtml(true);
+                  history.commitPending();
+                  hideSoftKeyboard();
                   setDrawerOpen(false);
                 }
+                setSpellMenu(null);
                 setIsEditing((v) => !v);
               }}
               className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 sm:px-3.5 ${
@@ -717,7 +947,10 @@ export default function WpsEditorView({
       )}
 
       {/* Scrollable Document Sheet Area */}
-      <div className="wps-print-scroll flex-1 overflow-y-auto px-3 py-4 pb-32 sm:px-6 sm:py-8">
+      <div
+        ref={scrollContainerRef}
+        className="wps-print-scroll flex-1 overflow-y-auto px-3 py-4 pb-32 sm:px-6 sm:py-8"
+      >
         <div
           className={`wps-print-sheet mx-auto transition-all ${
             layoutMode === 'page' || printViewMode ? 'max-w-[794px]' : 'max-w-[680px]'
@@ -731,7 +964,7 @@ export default function WpsEditorView({
               fontSize: printViewMode ? '11pt' : `${(16 * zoomPercent) / 100}px`,
               lineHeight: printViewMode ? '1.6' : lineSpacing,
             }}
-            className={`wps-print-paper relative min-h-[68vh] rounded-2xl border p-5 shadow-sm sm:p-10 ${
+            className={`wps-print-paper relative min-h-[68vh] overflow-x-auto rounded-2xl border p-5 shadow-sm sm:p-10 ${
               eyeCareMode && !printViewMode
                 ? 'border-[#E6D8B8] bg-[#FBF5E6] text-[#3B2F21]'
                 : 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100'
@@ -763,7 +996,8 @@ export default function WpsEditorView({
               contentEditable={isEditing && !printViewMode}
               spellCheck={false}
               suppressContentEditableWarning
-              onInput={persistEditorHtml}
+              onInput={() => persistEditorHtml(false)}
+              onKeyDown={handleEditorKeyDown}
               onKeyUp={syncFormatState}
               onMouseUp={syncFormatState}
               onTouchEnd={syncFormatState}

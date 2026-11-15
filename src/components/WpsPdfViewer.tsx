@@ -37,6 +37,14 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { WpsComment, WpsDocument } from '../data/wpsDocuments';
+import { useDocumentHistory } from '../hooks/useDocumentHistory';
+import {
+  hideSoftKeyboard,
+  isRangeInsideElement,
+  prepareSelectionForBlockInsert,
+  runCommandWithoutKeyboardPopup,
+  syncCheckboxAttribute,
+} from '../lib/editorDom';
 import PdfThumbnailSidebar from './PdfThumbnailSidebar';
 import {
   applyPdfEdits,
@@ -67,6 +75,28 @@ import WpsWordEditingBar, {
 import { base64ToUint8, uint8ToBase64 } from '../lib/wpsFileParser';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+interface PdfHistorySnapshot {
+  pdfBase64?: string;
+  pageHtmls: Record<number, string>;
+  textDirty: boolean;
+  draftAnnotations: PdfAnnotation[];
+  title: string;
+}
+
+function arePageHtmlMapsEqual(
+  a: Record<number, string>,
+  b: Record<number, string>,
+): boolean {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    const numKey = Number(k);
+    if (a[numKey] !== b[numKey]) return false;
+  }
+  return true;
+}
 
 interface WpsPdfViewerProps {
   document: WpsDocument;
@@ -105,7 +135,7 @@ interface PdfEditablePageProps {
   spellCheckEnabled: boolean;
   customDict: Set<string>;
   ignoredSpellWords: Set<string>;
-  onPageHtmlChange: (pageNumber: number, html: string) => void;
+  onPageHtmlChange: (pageNumber: number, html: string, immediate?: boolean) => void;
   onRegisterEditorElement: (pageNumber: number, el: HTMLDivElement | null) => void;
   onEditorFocusOrSelect: (pageNumber: number, el: HTMLDivElement) => void;
   onSpellErrorsChange: (pageNumber: number, matches: SpellErrorMatch[]) => void;
@@ -228,14 +258,25 @@ function PdfEditablePage({
     };
   }, [pdfDoc, pageNumber, scale]);
 
-  // Register and sync inline editor HTML without clobbering active typing cursor
+  const lastEmittedHtmlRef = useRef<string>(pageHtml);
+
+  // Register and sync inline editor HTML reliably (handles undo/redo & external updates without clobbering active typing)
   useEffect(() => {
     const el = editorRef.current;
     onRegisterEditorElement(pageNumber, isTextEditActive ? el : null);
     if (!isTextEditActive || !el) return;
-    if (window.document.activeElement === el) return;
-    if (el.innerHTML !== pageHtml) {
-      el.innerHTML = pageHtml || '<p></p>';
+
+    if (pageHtml !== lastEmittedHtmlRef.current || el.innerHTML === '') {
+      const targetHtml = pageHtml || '<p></p>';
+      if (el.innerHTML !== targetHtml) {
+        el.innerHTML = targetHtml;
+      }
+      lastEmittedHtmlRef.current = pageHtml;
+    } else if (window.document.activeElement !== el) {
+      const targetHtml = pageHtml || '<p></p>';
+      if (el.innerHTML !== targetHtml) {
+        el.innerHTML = targetHtml;
+      }
     }
   }, [isTextEditActive, pageNumber, pageHtml, onRegisterEditorElement]);
 
@@ -314,6 +355,24 @@ function PdfEditablePage({
   useEffect(() => {
     runSpellScan();
   }, [runSpellScan, pageHtml, scale]);
+
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el || !isTextEditActive) return;
+    const reposition = () => computeUnderlineRects(spellErrors);
+    const observer =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(reposition)
+        : null;
+    observer?.observe(el);
+    window.addEventListener('resize', reposition);
+    window.visualViewport?.addEventListener('resize', reposition);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', reposition);
+      window.visualViewport?.removeEventListener('resize', reposition);
+    };
+  }, [isTextEditActive, spellErrors, computeUnderlineRects]);
 
   useEffect(() => {
     return () => {
@@ -601,7 +660,12 @@ function PdfEditablePage({
             }}
             onInput={() => {
               if (!editorRef.current) return;
-              onPageHtmlChange(pageNumber, editorRef.current.innerHTML);
+              editorRef.current
+                .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+                .forEach(syncCheckboxAttribute);
+              const nextHtml = editorRef.current.innerHTML;
+              lastEmittedHtmlRef.current = nextHtml;
+              onPageHtmlChange(pageNumber, nextHtml, false);
               onEditorFocusOrSelect(pageNumber, editorRef.current);
               scheduleSpellScan();
             }}
@@ -626,12 +690,24 @@ function PdfEditablePage({
               }
             }}
             onClick={(e) => {
+              const target = e.target;
+              if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+                syncCheckboxAttribute(target);
+                hideSoftKeyboard();
+                if (editorRef.current) {
+                  const nextHtml = editorRef.current.innerHTML;
+                  lastEmittedHtmlRef.current = nextHtml;
+                  onPageHtmlChange(pageNumber, nextHtml, true);
+                }
+                return;
+              }
               if (openSpellContextFromPoint(e.clientX, e.clientY, false)) {
                 e.preventDefault();
+                hideSoftKeyboard();
               }
             }}
             style={{ minHeight: Math.max(160, pageSize.height - marginPad * 2 - 28) }}
-            className="wps-doc-canvas relative z-[1] outline-none"
+            className="wps-doc-canvas relative z-[1] min-w-0 outline-none"
           />
 
           <div className="mt-4 select-none border-t border-slate-100 pt-2 font-mono text-[10px] text-slate-400">
@@ -966,6 +1042,30 @@ export default function WpsPdfViewer({
     typeof window !== 'undefined' ? window.innerWidth : 1024,
   );
 
+  const history = useDocumentHistory<PdfHistorySnapshot>(
+    {
+      pdfBase64: doc.pdfBase64,
+      pageHtmls: {},
+      textDirty: false,
+      draftAnnotations: [],
+      title: doc.title,
+    },
+    doc.id,
+    {
+      equals: (a, b) =>
+        a.pdfBase64 === b.pdfBase64 &&
+        a.textDirty === b.textDirty &&
+        a.title === b.title &&
+        a.draftAnnotations === b.draftAnnotations &&
+        arePageHtmlMapsEqual(a.pageHtmls, b.pageHtmls),
+    },
+  );
+
+  const pageHtmlsRef = useRef<Record<number, string>>({});
+  const draftAnnotationsRef = useRef<PdfAnnotation[]>([]);
+  pageHtmlsRef.current = pageHtmls;
+  draftAnnotationsRef.current = draftAnnotations;
+
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener('resize', onResize);
@@ -989,6 +1089,17 @@ export default function WpsPdfViewer({
     setSpellErrorsByPage({});
     setSpellMenu(null);
   }, [doc.id]);
+
+  // Keep history synced with external updates (e.g. cloud sync)
+  useEffect(() => {
+    history.syncExternal({
+      pdfBase64: doc.pdfBase64,
+      pageHtmls: pageHtmlsRef.current,
+      textDirty: textDirtyRef.current,
+      draftAnnotations: draftAnnotationsRef.current,
+      title: doc.title,
+    });
+  }, [doc.pdfBase64, doc.title, history]);
 
   const rawBytes = useMemo(() => {
     if (doc.pdfBase64) {
@@ -1123,10 +1234,17 @@ export default function WpsPdfViewer({
       pageHtmlMapRef.current = map;
       setPageHtmls(map);
       extractedForBytesRef.current = revKey;
+      history.syncExternal({
+        pdfBase64: doc.pdfBase64,
+        pageHtmls: map,
+        textDirty: textDirtyRef.current,
+        draftAnnotations: draftAnnotationsRef.current,
+        title: doc.title,
+      });
     } finally {
       setIsExtractingPages(false);
     }
-  }, [pdfDoc, doc.id, doc.title, doc.pdfBase64]);
+  }, [pdfDoc, doc.id, doc.title, doc.pdfBase64, history]);
 
   const handleRegisterEditorElement = useCallback(
     (pageNumber: number, el: HTMLDivElement | null) => {
@@ -1141,7 +1259,10 @@ export default function WpsPdfViewer({
       if (sel && sel.rangeCount > 0) {
         const activeEl = editorElementsRef.current[activeEditorPageRef.current];
         if (activeEl?.contains(sel.anchorNode)) {
-          savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+          const range = sel.getRangeAt(0);
+          if (isRangeInsideElement(range, activeEl)) {
+            savedRangeRef.current = range.cloneRange();
+          }
         }
       }
       setInlineFormats({
@@ -1166,13 +1287,30 @@ export default function WpsPdfViewer({
     [syncInlineFormats],
   );
 
-  const handlePageHtmlChange = useCallback((pageNumber: number, html: string) => {
-    pageHtmlMapRef.current[pageNumber] = html;
-    setPageHtmls((prev) => ({ ...prev, [pageNumber]: html }));
-    textDirtyRef.current = true;
-    setTextDirty(true);
-    setEditNotice(null);
-  }, []);
+  const handlePageHtmlChange = useCallback(
+    (pageNumber: number, html: string, immediate = false) => {
+      const nextMap = { ...pageHtmlMapRef.current, [pageNumber]: html };
+      pageHtmlMapRef.current = nextMap;
+      setPageHtmls(nextMap);
+      textDirtyRef.current = true;
+      setTextDirty(true);
+      setEditNotice(null);
+
+      const snapshot: PdfHistorySnapshot = {
+        pdfBase64: doc.pdfBase64,
+        pageHtmls: nextMap,
+        textDirty: true,
+        draftAnnotations: draftAnnotationsRef.current,
+        title: doc.title,
+      };
+      if (immediate) {
+        history.pushImmediate(snapshot);
+      } else {
+        history.recordDebounced(snapshot);
+      }
+    },
+    [doc.pdfBase64, doc.title, history],
+  );
 
   const handleSpellErrorsChange = useCallback(
     (pageNumber: number, matches: SpellErrorMatch[]) => {
@@ -1203,25 +1341,82 @@ export default function WpsPdfViewer({
     return out;
   }, [spellErrorsByPage]);
 
+  const applyHistorySnapshot = useCallback(
+    (snapshot: PdfHistorySnapshot | null) => {
+      if (!snapshot) return;
+      setSpellMenu(null);
+      setSelectedId(null);
+      savedRangeRef.current = null;
+
+      pageHtmlMapRef.current = snapshot.pageHtmls;
+      setPageHtmls(snapshot.pageHtmls);
+      textDirtyRef.current = snapshot.textDirty;
+      setTextDirty(snapshot.textDirty);
+      setDraftAnnotations(snapshot.draftAnnotations);
+
+      if (snapshot.pdfBase64 !== doc.pdfBase64 || snapshot.title !== doc.title) {
+        extractedForBytesRef.current =
+          Object.keys(snapshot.pageHtmls).length > 0
+            ? `${doc.id}:${snapshot.pdfBase64?.length ?? 0}:${numPages}`
+            : null;
+        onUpdateDocument({
+          pdfBase64: snapshot.pdfBase64,
+          title: snapshot.title,
+          updatedAt: 'Ahora mismo',
+        });
+      }
+
+      // If snapshot has uncommitted draft edits while user was outside edit mode, reveal them immediately
+      if (!editMode && (snapshot.textDirty || snapshot.draftAnnotations.length > 0)) {
+        setEditMode(true);
+        setEditSubMode(snapshot.draftAnnotations.length > 0 ? 'annotate' : 'text');
+      }
+
+      setEditNotice(null);
+      syncInlineFormats();
+    },
+    [doc.id, doc.pdfBase64, doc.title, editMode, numPages, onUpdateDocument, syncInlineFormats],
+  );
+
+  const handleUndo = useCallback(() => {
+    const prev = history.undo();
+    applyHistorySnapshot(prev);
+  }, [applyHistorySnapshot, history]);
+
+  const handleRedo = useCallback(() => {
+    const next = history.redo();
+    applyHistorySnapshot(next);
+  }, [applyHistorySnapshot, history]);
+
   const runWordCommand = (command: string, value?: string) => {
+    if (command === 'undo') {
+      handleUndo();
+      return;
+    }
+    if (command === 'redo') {
+      handleRedo();
+      return;
+    }
     if (editSubMode !== 'text') {
       void handleSwitchEditSubMode('text');
       return;
     }
     const targetPage = activeEditorPageRef.current || currentPage || 1;
     const el = editorElementsRef.current[targetPage];
-    if (el) {
-      el.focus();
-      const sel = window.getSelection();
-      if (sel && savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)) {
-        sel.removeAllRanges();
-        sel.addRange(savedRangeRef.current);
+    if (!el) return;
+
+    const isBlockInsertion =
+      command === 'insertHTML' &&
+      typeof value === 'string' &&
+      /<(table|hr|p|h[1-3]|ul|ol|blockquote)\b/i.test(value);
+
+    runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+      if (isBlockInsertion) {
+        prepareSelectionForBlockInsert(el, savedRangeRef.current);
       }
-    }
-    window.document.execCommand(command, false, value);
-    if (el) {
-      handlePageHtmlChange(targetPage, el.innerHTML);
-    }
+      window.document.execCommand(command, false, value);
+    });
+    handlePageHtmlChange(targetPage, el.innerHTML, true);
     syncInlineFormats();
   };
 
@@ -1296,18 +1491,19 @@ export default function WpsPdfViewer({
     setSpellMenu(null);
     if (!menu.range.startContainer.isConnected || !el) return;
     try {
-      el.focus();
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(menu.range);
-      }
-      const applied = window.document.execCommand('insertText', false, replacement);
-      if (!applied) {
-        menu.range.deleteContents();
-        menu.range.insertNode(window.document.createTextNode(replacement));
-      }
-      handlePageHtmlChange(targetPage, el.innerHTML);
+      runCommandWithoutKeyboardPopup(el, menu.range, () => {
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(menu.range);
+        }
+        const applied = window.document.execCommand('insertText', false, replacement);
+        if (!applied) {
+          menu.range.deleteContents();
+          menu.range.insertNode(window.document.createTextNode(replacement));
+        }
+      });
+      handlePageHtmlChange(targetPage, el.innerHTML, true);
     } catch {
       // Ignore stale range replacement
     }
@@ -1334,40 +1530,59 @@ export default function WpsPdfViewer({
     setSpellMenu(null);
   };
 
-  const handleAddAnnotation = useCallback((ann: PdfAnnotation) => {
-    setDraftAnnotations((prev) => [...prev, ann]);
-    setEditNotice(null);
-  }, []);
+  const handleAddAnnotation = useCallback(
+    (ann: PdfAnnotation) => {
+      const next = [...draftAnnotationsRef.current, ann];
+      setDraftAnnotations(next);
+      setEditNotice(null);
+      history.pushImmediate({
+        pdfBase64: doc.pdfBase64,
+        pageHtmls: pageHtmlMapRef.current,
+        textDirty: textDirtyRef.current,
+        draftAnnotations: next,
+        title: doc.title,
+      });
+    },
+    [doc.pdfBase64, doc.title, history],
+  );
 
   const handleUpdateAnnotation = useCallback(
     (id: string, patch: Partial<PdfAnnotation>) => {
-      setDraftAnnotations((prev) =>
-        prev.map((ann) =>
-          ann.id === id ? ({ ...ann, ...patch } as PdfAnnotation) : ann,
-        ),
+      const next = draftAnnotationsRef.current.map((ann) =>
+        ann.id === id ? ({ ...ann, ...patch } as PdfAnnotation) : ann,
       );
+      setDraftAnnotations(next);
+      history.recordDebounced({
+        pdfBase64: doc.pdfBase64,
+        pageHtmls: pageHtmlMapRef.current,
+        textDirty: textDirtyRef.current,
+        draftAnnotations: next,
+        title: doc.title,
+      });
     },
-    [],
+    [doc.pdfBase64, doc.title, history],
   );
 
-  const handleDeleteAnnotation = useCallback((id: string) => {
-    setDraftAnnotations((prev) => prev.filter((a) => a.id !== id));
-    setSelectedId((prev) => (prev === id ? null : prev));
-  }, []);
-
-  const handleUndoAnnotation = () => {
-    setDraftAnnotations((prev) => {
-      if (prev.length === 0) return prev;
-      const removed = prev[prev.length - 1];
-      if (selectedId === removed.id) setSelectedId(null);
-      return prev.slice(0, -1);
-    });
-  };
+  const handleDeleteAnnotation = useCallback(
+    (id: string) => {
+      const next = draftAnnotationsRef.current.filter((a) => a.id !== id);
+      setDraftAnnotations(next);
+      setSelectedId((prev) => (prev === id ? null : prev));
+      history.pushImmediate({
+        pdfBase64: doc.pdfBase64,
+        pageHtmls: pageHtmlMapRef.current,
+        textDirty: textDirtyRef.current,
+        draftAnnotations: next,
+        title: doc.title,
+      });
+    },
+    [doc.pdfBase64, doc.title, history],
+  );
 
   const commitAllEditsAndGetBytes = async (): Promise<Uint8Array> => {
     let workingBytes = rawBytes;
     const hasTextChanges = textDirtyRef.current;
-    const hasDrawChanges = draftAnnotations.length > 0;
+    const hasDrawChanges = draftAnnotationsRef.current.length > 0;
 
     if (!hasTextChanges && !hasDrawChanges) {
       return workingBytes;
@@ -1385,13 +1600,20 @@ export default function WpsPdfViewer({
     }
 
     if (hasDrawChanges) {
-      workingBytes = await applyPdfEdits(workingBytes, draftAnnotations);
+      workingBytes = await applyPdfEdits(workingBytes, draftAnnotationsRef.current);
       setDraftAnnotations([]);
       setSelectedId(null);
     }
 
     const base64 = uint8ToBase64(workingBytes);
     extractedForBytesRef.current = `${doc.id}:${base64.length}:${numPages}`;
+    history.syncExternal({
+      pdfBase64: base64,
+      pageHtmls: pageHtmlMapRef.current,
+      textDirty: false,
+      draftAnnotations: [],
+      title: doc.title,
+    });
     onUpdateDocument({
       pdfBase64: base64,
       updatedAt: 'Ahora mismo',
@@ -1431,6 +1653,8 @@ export default function WpsPdfViewer({
     }
 
     // Closing edit mode: persist any unsaved text/canvas changes into PDF bytes cleanly in place
+    history.commitPending();
+    hideSoftKeyboard();
     if (textDirtyRef.current || draftAnnotations.length > 0) {
       setIsApplyingEdits(true);
       try {
@@ -1454,6 +1678,8 @@ export default function WpsPdfViewer({
 
   const handleSwitchEditSubMode = async (nextSubMode: EditSubMode) => {
     if (nextSubMode === editSubMode || isApplyingEdits) return;
+    history.commitPending();
+    hideSoftKeyboard();
     setSpellMenu(null);
     if (nextSubMode === 'annotate') {
       if (textDirtyRef.current) {
@@ -1484,16 +1710,25 @@ export default function WpsPdfViewer({
     noticeText: string,
   ) => {
     if (isApplyingEdits) return;
+    history.commitPending();
     setIsApplyingEdits(true);
     setEditNotice(null);
     try {
       const baseBytes = await commitAllEditsAndGetBytes();
       const updated = await op(baseBytes);
+      const nextBase64 = uint8ToBase64(updated);
       extractedForBytesRef.current = null;
       pageHtmlMapRef.current = {};
       setPageHtmls({});
+      history.pushImmediate({
+        pdfBase64: nextBase64,
+        pageHtmls: {},
+        textDirty: false,
+        draftAnnotations: [],
+        title: doc.title,
+      });
       onUpdateDocument({
-        pdfBase64: uint8ToBase64(updated),
+        pdfBase64: nextBase64,
         updatedAt: 'Ahora mismo',
       });
       setEditNotice(noticeText);
@@ -1519,7 +1754,7 @@ export default function WpsPdfViewer({
       a.href = url;
       a.download = `${doc.title.replace(/[^\w\dáéíóúñÁÉÍÓÚÑ\-_ ]+/g, '').trim() || 'documento'}.pdf`;
       a.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
     } finally {
       setIsApplyingEdits(false);
     }
@@ -1629,55 +1864,63 @@ export default function WpsPdfViewer({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-          {editMode && editSubMode === 'text' && (
+          {(editMode || history.canUndo || history.canRedo) && (
             <>
               <button
                 type="button"
+                disabled={!history.canUndo || isApplyingEdits}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runWordCommand('undo')}
+                onClick={handleUndo}
                 aria-label="Deshacer"
-                className="flex min-h-[44px] min-w-[38px] sm:min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Deshacer cambio"
+                className="flex min-h-[44px] min-w-[38px] sm:min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 <Undo2 className="h-4 w-4" />
               </button>
               <button
                 type="button"
+                disabled={!history.canRedo || isApplyingEdits}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runWordCommand('redo')}
+                onClick={handleRedo}
                 aria-label="Rehacer"
-                className="hidden min-h-[44px] min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Rehacer cambio"
+                className="hidden min-h-[44px] min-w-[42px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 disabled:opacity-35 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 <Redo2 className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                onClick={handleJumpToNextSpellError}
-                title={
-                  spellCheckEnabled
-                    ? flattenedSpellErrors.length > 0
-                      ? `${flattenedSpellErrors.length} error(es) ortográfico(s) — Clic para revisar`
-                      : 'Sin errores ortográficos'
-                    : 'Activar corrector ortográfico'
-                }
-                aria-label="Revisar ortografía"
-                className={`inline-flex min-h-[40px] items-center gap-1 rounded-xl px-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                  !spellCheckEnabled
-                    ? 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'
-                    : flattenedSpellErrors.length > 0
-                      ? 'bg-red-50 text-[#EA3D2F] hover:bg-red-100 dark:bg-red-950/50 dark:text-red-400 dark:hover:bg-red-950/80'
-                      : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
-                }`}
-              >
-                <SpellCheck className="h-4 w-4 shrink-0" />
-                <span className="hidden md:inline font-mono tabular-nums">
-                  {!spellCheckEnabled
-                    ? 'Off'
-                    : flattenedSpellErrors.length > 0
-                      ? `${flattenedSpellErrors.length}`
-                      : 'OK'}
-                </span>
-              </button>
             </>
+          )}
+
+          {editMode && editSubMode === 'text' && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleJumpToNextSpellError}
+              title={
+                spellCheckEnabled
+                  ? flattenedSpellErrors.length > 0
+                    ? `${flattenedSpellErrors.length} error(es) ortográfico(s) — Clic para revisar`
+                    : 'Sin errores ortográficos'
+                  : 'Activar corrector ortográfico'
+              }
+              aria-label="Revisar ortografía"
+              className={`inline-flex min-h-[40px] items-center gap-1 rounded-xl px-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                !spellCheckEnabled
+                  ? 'text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800'
+                  : flattenedSpellErrors.length > 0
+                    ? 'bg-red-50 text-[#EA3D2F] hover:bg-red-100 dark:bg-red-950/50 dark:text-red-400 dark:hover:bg-red-950/80'
+                    : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
+              }`}
+            >
+              <SpellCheck className="h-4 w-4 shrink-0" />
+              <span className="hidden md:inline font-mono tabular-nums">
+                {!spellCheckEnabled
+                  ? 'Off'
+                  : flattenedSpellErrors.length > 0
+                    ? `${flattenedSpellErrors.length}`
+                    : 'OK'}
+              </span>
+            </button>
           )}
 
           {hasPendingSaves && (
@@ -1887,8 +2130,8 @@ export default function WpsPdfViewer({
 
                 <button
                   type="button"
-                  disabled={draftAnnotations.length === 0}
-                  onClick={handleUndoAnnotation}
+                  disabled={!history.canUndo}
+                  onClick={handleUndo}
                   aria-label="Deshacer último trazo"
                   className="inline-flex min-h-[34px] shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-35 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
@@ -2178,7 +2421,6 @@ export default function WpsPdfViewer({
 
               <textarea
                 rows={2}
-                autoFocus
                 value={selectedAnnotation.text}
                 onChange={(e) =>
                   handleUpdateAnnotation(selectedAnnotation.id, {

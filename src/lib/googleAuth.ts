@@ -1,20 +1,15 @@
-import { initializeApp } from 'firebase/app';
 import {
-  getAuth,
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
   User,
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { auth } from './firebase';
 
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.metadata.readonly',
 ];
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
 for (const scope of SCOPES) {
@@ -24,6 +19,12 @@ for (const scope of SCOPES) {
 let isSigningIn = false;
 // Access token must live strictly in memory (never localStorage or sessionStorage)
 let cachedAccessToken: string | null = null;
+
+export const subscribeFirebaseAuth = (onUserChanged: (user: User | null) => void) => {
+  return onAuthStateChanged(auth, (user: User | null) => {
+    onUserChanged(user);
+  });
+};
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,

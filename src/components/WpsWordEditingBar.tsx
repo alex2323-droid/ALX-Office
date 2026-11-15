@@ -26,6 +26,11 @@ import {
   Underline,
 } from 'lucide-react';
 import { WpsComment } from '../data/wpsDocuments';
+import {
+  createChecklistHtml,
+  escapeHtmlText,
+  hideSoftKeyboard,
+} from '../lib/editorDom';
 
 export type ToolDrawerTab = 'inicio' | 'insertar' | 'ver' | 'revisar';
 
@@ -128,21 +133,22 @@ export default function WpsWordEditingBar({
   };
 
   const handleInsertChecklist = () => {
-    onInsertHtml(
-      `<p><input type="checkbox" style="margin-right:8px;" /> Elemento de verificación</p>`,
-    );
+    onInsertHtml(createChecklistHtml());
   };
 
   const handleInsertLink = () => {
     const cleanUrl = linkUrl.trim();
     if (!cleanUrl) return;
+    if (/^\s*javascript:/i.test(cleanUrl)) return;
     const safeUrl =
-      cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')
+      cleanUrl.startsWith('http://') ||
+      cleanUrl.startsWith('https://') ||
+      cleanUrl.startsWith('mailto:')
         ? cleanUrl
         : `https://${cleanUrl}`;
     const label = linkLabel.trim() || safeUrl;
     onInsertHtml(
-      `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a> `,
+      `<a href="${escapeHtmlText(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtmlText(label)}</a> `,
     );
     setLinkUrl('');
     setLinkLabel('');
@@ -157,7 +163,9 @@ export default function WpsWordEditingBar({
         if (onInsertImageDataUrl) {
           onInsertImageDataUrl(reader.result, file.name);
         } else {
-          onInsertHtml(`<p><img src="${reader.result}" alt="${file.name}" /></p>`);
+          onInsertHtml(
+            `<p><img src="${reader.result}" alt="${escapeHtmlText(file.name)}" /></p>`,
+          );
         }
       }
     };
@@ -204,7 +212,11 @@ export default function WpsWordEditingBar({
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => onDrawerTabChange(tab.id)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      hideSoftKeyboard();
+                      onDrawerTabChange(tab.id);
+                    }}
                     className={`min-h-[44px] border-b-2 px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                       drawerTab === tab.id
                         ? 'border-[#EA3D2F] text-[#EA3D2F] dark:text-red-400'
@@ -218,6 +230,7 @@ export default function WpsWordEditingBar({
 
               <button
                 type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onDrawerOpenChange(false)}
                 aria-label="Cerrar panel de herramientas"
                 className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
@@ -749,7 +762,13 @@ export default function WpsWordEditingBar({
 
         <button
           type="button"
-          onClick={() => onDrawerOpenChange(!drawerOpen)}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            if (!drawerOpen) {
+              hideSoftKeyboard();
+            }
+            onDrawerOpenChange(!drawerOpen);
+          }}
           className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
             drawerOpen
               ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
