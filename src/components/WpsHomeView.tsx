@@ -32,6 +32,7 @@ import {
   TemplatePageThumbnail,
   TemplatePreviewModal,
 } from './TemplatePreview';
+import { isNativeCapacitorApp } from '../lib/googleAuth';
 
 const FORMAT_FILTERS: ('ALL' | WpsFormat)[] = ['ALL', 'DOCX', 'DOC', 'PDF', 'PPTX', 'PPT', 'TXT'];
 
@@ -392,7 +393,9 @@ export default function WpsHomeView({
                   </div>
                   <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                     {needsGoogleAuth
-                      ? 'Conecta tu cuenta de Google para abrir PDF, PPT, PPTX, DOC o DOCX desde Drive.'
+                      ? isNativeCapacitorApp()
+                        ? 'En la APK local (localhost), usa la versión Web/PWA en Chrome para conectar Google Drive.'
+                        : 'Conecta tu cuenta de Google para abrir PDF, PPT, PPTX, DOC o DOCX desde Drive.'
                       : `Conectado como ${googleUserEmail || 'Cuenta de Google'}`}
                   </div>
                 </div>
@@ -673,6 +676,24 @@ export default function WpsHomeView({
                 </section>
               </>
             )}
+
+            <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-4 text-xs text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
+              <span>ALX Office · Suite documental offline y Drive</span>
+              <div className="flex items-center gap-4">
+                <a
+                  href="/privacy.html"
+                  className="hover:text-slate-800 hover:underline dark:hover:text-slate-200"
+                >
+                  Política de privacidad
+                </a>
+                <a
+                  href="/terms.html"
+                  className="hover:text-slate-800 hover:underline dark:hover:text-slate-200"
+                >
+                  Condiciones del servicio
+                </a>
+              </div>
+            </footer>
           </main>
         </div>
       </div>

@@ -27,6 +27,7 @@ import {
   upsertCloudDocument,
 } from './lib/firebaseSync';
 import {
+  formatGoogleAuthError,
   getAccessToken,
   googleSignIn,
   initAuth,
@@ -492,10 +493,7 @@ export default function App() {
     } catch (err) {
       setStatusNotice({
         kind: 'error',
-        text:
-          err instanceof Error
-            ? `No se pudo iniciar sesión con Google: ${err.message}`
-            : 'No se pudo completar el inicio de sesión con Google.',
+        text: formatGoogleAuthError(err),
       });
     } finally {
       setIsLoggingIn(false);
@@ -530,10 +528,7 @@ export default function App() {
       } catch (err) {
         setStatusNotice({
           kind: 'error',
-          text:
-            err instanceof Error
-              ? `Autenticación requerida para Google Picker: ${err.message}`
-              : 'Inicia sesión con Google para usar Google Picker.',
+          text: formatGoogleAuthError(err),
         });
         return;
       } finally {

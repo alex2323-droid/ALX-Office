@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Política de Privacidad — ALX Office</title>
+    <link rel="icon" type="image/png" href="/assets/aistudio/1794708396591_f43e1352.png" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f8fafc;
+        --card: #ffffff;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --muted: #475569;
+        --accent: #ea3d2f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #020617;
+          --card: #0f172a;
+          --border: #1e293b;
+          --text: #f1f5f9;
+          --muted: #94a3b8;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.65;
+        padding: 24px 16px 48px;
+      }
+      .container {
+        max-width: 780px;
+        margin: 0 auto;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 28px 24px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 24px;
+      }
+      header img {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+      }
+      h1 { font-size: 1.5rem; margin: 0; }
+      h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+      p, li { color: var(--muted); font-size: 0.95rem; }
+      ul { padding-left: 20px; }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .meta { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+      footer {
+        margin-top: 28px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <img src="/assets/aistudio/1794708396591_f43e1352.png" alt="ALX Office" />
+        <div>
+          <h1>Política de Privacidad de ALX Office</h1>
+          <div class="meta">Última actualización: 15 de noviembre de 2026</div>
+        </div>
+      </header>
+
+      <p>
+        <strong>ALX Office</strong> es una aplicación web progresiva (PWA) y suite documental diseñada para visualizar, crear y editar documentos (DOCX, DOC, TXT), archivos PDF y presentaciones (PPT, PPTX). Esta política explica qué datos se procesan, cómo se utilizan y cómo protegemos tu información.
+      </p>
+
+      <h2>1. Datos a los que accede la aplicación</h2>
+      <ul>
+        <li>
+          <strong>Cuenta de Google (Firebase Authentication):</strong> cuando decides iniciar sesión con Google, accedemos a tu identificador de usuario, nombre visible y dirección de correo electrónico únicamente para autenticar tu sesión y vincular tus documentos sincronizados.
+        </li>
+        <li>
+          <strong>Google Drive y Google Picker:</strong> mediante los permisos <code>https://www.googleapis.com/auth/drive.file</code> y <code>https://www.googleapis.com/auth/drive.metadata.readonly</code>, la aplicación solo lista y abre los archivos que seleccionas explícitamente en Google Picker o sube las copias que tú decides guardar en tu unidad de Google Drive.
+        </li>
+        <li>
+          <strong>Documentos y preferencias del usuario:</strong> el contenido de tus documentos, anotaciones, favoritos y preferencia de tema (claro/oscuro) se almacenan localmente en tu navegador/dispositivo (IndexedDB y almacenamiento local) para uso sin conexión y, si has iniciado sesión con una cuenta verificada, se sincronizan en tu espacio privado de Cloud Firestore.
+        </li>
+      </ul>
+
+      <h2>2. Uso limitado de datos de APIs de Google</h2>
+      <p>
+        El uso y la transferencia a cualquier otra aplicación de la información recibida de las APIs de Google por parte de <strong>ALX Office</strong> cumplen estrictamente con la
+        <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">
+          Política de Datos de Usuario de los Servicios API de Google
+        </a>, incluidos los requisitos de <strong>Uso Limitado</strong>:
+      </p>
+      <ul>
+        <li>No vendemos tus datos personales ni el contenido de tus archivos.</li>
+        <li>No utilizamos tus documentos ni datos de Google Drive para publicidad, perfilado comercial ni entrenamiento de modelos externos.</li>
+        <li>Los tokens de acceso OAuth de Google Drive se mantienen únicamente en memoria durante la sesión activa y se eliminan al cerrar sesión o recargar la página.</li>
+      </ul>
+
+      <h2>3. Almacenamiento, seguridad y eliminación de datos</h2>
+      <ul>
+        <li>Los datos sincronizados en Cloud Firestore están protegidos mediante reglas de seguridad que restringen la lectura y escritura exclusivamente al propietario autenticado (<code>uid</code>).</li>
+        <li>Puedes eliminar cualquier documento directamente desde la aplicación en cualquier momento, cerrar sesión de Google para revocar el token activo o revocar el acceso de la app desde la configuración de seguridad de tu cuenta de Google.</li>
+        <li>Para solicitar la eliminación completa de datos asociados en la nube, escribe al correo de contacto indicado abajo.</li>
+      </ul>
+
+      <h2>4. Contacto</h2>
+      <p>
+        Si tienes preguntas sobre esta Política de Privacidad o sobre el tratamiento de tus datos, puedes contactar al desarrollador en:
+        <a href="mailto:alexparababi23@gmail.com">alexparababi23@gmail.com</a>.
+      </p>
+
+      <footer>
+        <a href="/">Volver a ALX Office</a>
+        <a href="/terms.html">Condiciones del Servicio</a>
+      </footer>
+    </main>
+  </body>
+</html>
