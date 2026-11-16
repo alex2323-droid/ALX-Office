@@ -4,11 +4,14 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   ArrowDown,
   ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Bold,
   Check,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  Copy,
   Download,
   Eraser,
   Eye,
@@ -16,7 +19,10 @@ import {
   FileText,
   Grid,
   Highlighter,
+  Image as ImageIcon,
+  Italic,
   Loader2,
+  Minus,
   Moon,
   MousePointer,
   PanelLeft,
@@ -55,6 +61,7 @@ import {
   movePdfPage,
   PdfAnnotation,
   PdfDrawAnnotation,
+  PdfImageAnnotation,
   PdfRectAnnotation,
   PdfTextAnnotation,
   rotatePdfPage,
@@ -72,6 +79,7 @@ import WpsWordEditingBar, {
   ToolDrawerTab,
   WordActiveFormats,
 } from './WpsWordEditingBar';
+import { CANVA_COLORS, CanvaColorSwatchRow } from './CanvaControls';
 import { base64ToUint8, uint8ToBase64 } from '../lib/wpsFileParser';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -110,11 +118,20 @@ interface ExtractedPdfPage {
   text: string;
 }
 
-type PdfTool = 'select' | 'text' | 'draw' | 'highlight' | 'redact' | 'box';
+type PdfTool =
+  | 'select'
+  | 'text'
+  | 'draw'
+  | 'highlight'
+  | 'redact'
+  | 'box'
+  | 'circle'
+  | 'arrow'
+  | 'line';
 type EditSubMode = 'text' | 'annotate';
 
-const TEXT_COLORS = ['#0F172A', '#EA3D2F', '#2563EB', '#16A34A', '#FFFFFF'];
-const HIGHLIGHT_COLORS = ['#FACC15', '#4ADE80', '#38BDF8', '#F472B6'];
+const TEXT_COLORS = CANVA_COLORS.slice(0, 8);
+const HIGHLIGHT_COLORS = ['#FACC15', '#4ADE80', '#38BDF8', '#F472B6', '#FB923C', '#C084FC'];
 
 interface SpellUnderlineRect {
   id: string;
@@ -211,6 +228,17 @@ function PdfEditablePage({
     origXPct: number;
     origYPct: number;
     moved: boolean;
+  } | null>(null);
+
+  const boxTransformRef = useRef<{
+    id: string;
+    mode: 'move' | 'resize';
+    startClientX: number;
+    startClientY: number;
+    origXPct: number;
+    origYPct: number;
+    origWPct: number;
+    origHPct: number;
   } | null>(null);
 
   const isTextEditActive = editMode && editSubMode === 'text';
@@ -477,7 +505,10 @@ function PdfEditablePage({
     if (
       activeTool === 'highlight' ||
       activeTool === 'redact' ||
-      activeTool === 'box'
+      activeTool === 'box' ||
+      activeTool === 'circle' ||
+      activeTool === 'arrow' ||
+      activeTool === 'line'
     ) {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -492,6 +523,23 @@ function PdfEditablePage({
   };
 
   const handleOverlayPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (boxTransformRef.current) {
+      const tr = boxTransformRef.current;
+      if (pageSize.width <= 0 || pageSize.height <= 0) return;
+      const dxPct = (e.clientX - tr.startClientX) / pageSize.width;
+      const dyPct = (e.clientY - tr.startClientY) / pageSize.height;
+      if (tr.mode === 'move') {
+        const nextX = Math.max(0, Math.min(1 - tr.origWPct, tr.origXPct + dxPct));
+        const nextY = Math.max(0, Math.min(1 - tr.origHPct, tr.origYPct + dyPct));
+        onUpdateAnnotation(tr.id, { xPct: nextX, yPct: nextY });
+      } else {
+        const nextW = Math.max(0.04, Math.min(1 - tr.origXPct, tr.origWPct + dxPct));
+        const nextH = Math.max(0.025, Math.min(1 - tr.origYPct, tr.origHPct + dyPct));
+        onUpdateAnnotation(tr.id, { wPct: nextW, hPct: nextH });
+      }
+      return;
+    }
+
     if (dragTextRef.current) {
       const drag = dragTextRef.current;
       const dx = e.clientX - drag.startClientX;
@@ -527,6 +575,11 @@ function PdfEditablePage({
   };
 
   const handleOverlayPointerUp = () => {
+    if (boxTransformRef.current) {
+      boxTransformRef.current = null;
+      return;
+    }
+
     if (dragTextRef.current) {
       dragTextRef.current = null;
       return;
@@ -542,6 +595,8 @@ function PdfEditablePage({
           points: draftStroke,
           color: activeColor,
           strokeWidth: 2.2,
+          opacity: 1,
+          zIndex: annotations.length + 1,
         };
         onAddAnnotation(drawAnn);
         onSelectAnnotation(id);
@@ -554,10 +609,18 @@ function PdfEditablePage({
       const xPct = Math.min(draftRect.startX, draftRect.endX);
       const yPct = Math.min(draftRect.startY, draftRect.endY);
       const wPct = Math.abs(draftRect.endX - draftRect.startX);
-      const hPct = Math.abs(draftRect.endY - draftRect.startY);
-      if (wPct >= 0.012 && hPct >= 0.008) {
-        const kind =
-          activeTool === 'highlight' || activeTool === 'redact'
+      const hPctRaw = Math.abs(draftRect.endY - draftRect.startY);
+      const isLineLike = activeTool === 'arrow' || activeTool === 'line';
+      const hPct = isLineLike ? Math.max(0.035, hPctRaw) : hPctRaw;
+      const minW = 0.015;
+      const minH = isLineLike ? 0.001 : 0.008;
+      if (wPct >= minW && hPctRaw >= minH) {
+        const kind: PdfRectAnnotation['kind'] =
+          activeTool === 'highlight' ||
+          activeTool === 'redact' ||
+          activeTool === 'circle' ||
+          activeTool === 'arrow' ||
+          activeTool === 'line'
             ? activeTool
             : 'box';
         const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -570,6 +633,9 @@ function PdfEditablePage({
           wPct,
           hPct,
           color: kind === 'redact' ? '#FFFFFF' : activeColor,
+          strokeWidth: 2,
+          opacity: 1,
+          zIndex: annotations.length + 1,
         };
         onAddAnnotation(rectAnn);
         onSelectAnnotation(id);
@@ -584,9 +650,20 @@ function PdfEditablePage({
       ? 'sepia(0.28) brightness(0.97)'
       : 'none';
 
-  const pageAnns = annotations.filter((a) => a.pageNumber === pageNumber);
-  const svgAnns = pageAnns.filter((a) => a.kind !== 'text');
-  const textAnns = pageAnns.filter((a): a is PdfTextAnnotation => a.kind === 'text');
+  const pageAnns = annotations
+    .filter((a) => a.pageNumber === pageNumber)
+    .slice()
+    .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  const svgAnns = pageAnns.filter(
+    (a): a is PdfDrawAnnotation | PdfRectAnnotation =>
+      a.kind !== 'text' && a.kind !== 'image',
+  );
+  const imageAnns = pageAnns.filter(
+    (a): a is PdfImageAnnotation => a.kind === 'image',
+  );
+  const textAnns = pageAnns.filter(
+    (a): a is PdfTextAnnotation => a.kind === 'text',
+  );
 
   const isAnnotating = editMode && editSubMode === 'annotate';
   const cursorClass = !isAnnotating
@@ -792,16 +869,30 @@ function PdfEditablePage({
               const ry = ann.yPct * pageSize.height;
               const rw = ann.wPct * pageSize.width;
               const rh = ann.hPct * pageSize.height;
+              const annOpacity = ann.opacity ?? 1;
+              const strokeW = (ann.strokeWidth ?? 2) * scale;
+              const midY = ry + rh / 2;
 
               return (
                 <g
                   key={ann.id}
+                  opacity={annOpacity}
                   onPointerDown={(e) => {
                     if (!isAnnotating || activeTool !== 'select') return;
                     e.stopPropagation();
                     onSelectAnnotation(ann.id);
+                    boxTransformRef.current = {
+                      id: ann.id,
+                      mode: 'move',
+                      startClientX: e.clientX,
+                      startClientY: e.clientY,
+                      origXPct: ann.xPct,
+                      origYPct: ann.yPct,
+                      origWPct: ann.wPct,
+                      origHPct: ann.hPct,
+                    };
                   }}
-                  className={isAnnotating && activeTool === 'select' ? 'cursor-pointer' : ''}
+                  className={isAnnotating && activeTool === 'select' ? 'cursor-move' : ''}
                 >
                   {ann.kind === 'highlight' && (
                     <rect
@@ -831,22 +922,99 @@ function PdfEditablePage({
                       y={ry}
                       width={rw}
                       height={rh}
-                      fill="none"
+                      fill={
+                        ann.fillColor && ann.fillColor !== 'transparent'
+                          ? ann.fillColor
+                          : 'transparent'
+                      }
                       stroke={ann.color}
-                      strokeWidth={2 * scale}
+                      strokeWidth={strokeW}
                     />
                   )}
-                  {isSelected && (
-                    <rect
-                      x={rx - 2}
-                      y={ry - 2}
-                      width={rw + 4}
-                      height={rh + 4}
-                      fill="none"
-                      stroke="#EA3D2F"
-                      strokeWidth={1.5}
-                      strokeDasharray="4 3"
+                  {ann.kind === 'circle' && (
+                    <ellipse
+                      cx={rx + rw / 2}
+                      cy={ry + rh / 2}
+                      rx={Math.max(2, rw / 2)}
+                      ry={Math.max(2, rh / 2)}
+                      fill={
+                        ann.fillColor && ann.fillColor !== 'transparent'
+                          ? ann.fillColor
+                          : 'transparent'
+                      }
+                      stroke={ann.color}
+                      strokeWidth={strokeW}
                     />
+                  )}
+                  {(ann.kind === 'line' || ann.kind === 'arrow') && (
+                    <>
+                      <rect
+                        x={rx}
+                        y={ry}
+                        width={rw}
+                        height={Math.max(12, rh)}
+                        fill="transparent"
+                      />
+                      <line
+                        x1={rx}
+                        y1={midY}
+                        x2={rx + rw}
+                        y2={midY}
+                        stroke={ann.color}
+                        strokeWidth={strokeW}
+                        strokeLinecap="round"
+                      />
+                      {ann.kind === 'arrow' && (
+                        <polyline
+                          points={`${rx + rw - Math.max(8, strokeW * 4)},${midY - Math.max(5, strokeW * 2.2)} ${rx + rw},${midY} ${rx + rw - Math.max(8, strokeW * 4)},${midY + Math.max(5, strokeW * 2.2)}`}
+                          fill="none"
+                          stroke={ann.color}
+                          strokeWidth={strokeW}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      )}
+                    </>
+                  )}
+                  {isSelected && (
+                    <>
+                      <rect
+                        x={rx - 2}
+                        y={ry - 2}
+                        width={rw + 4}
+                        height={rh + 4}
+                        fill="none"
+                        stroke="#EA3D2F"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 3"
+                      />
+                      {isAnnotating && activeTool === 'select' && (
+                        <rect
+                          x={rx + rw - 6}
+                          y={ry + rh - 6}
+                          width={14}
+                          height={14}
+                          rx={3}
+                          fill="#FFFFFF"
+                          stroke="#EA3D2F"
+                          strokeWidth={2}
+                          className="cursor-nwse-resize"
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            boxTransformRef.current = {
+                              id: ann.id,
+                              mode: 'resize',
+                              startClientX: e.clientX,
+                              startClientY: e.clientY,
+                              origXPct: ann.xPct,
+                              origYPct: ann.yPct,
+                              origWPct: ann.wPct,
+                              origHPct: ann.hPct,
+                            };
+                          }}
+                        />
+                      )}
+                    </>
                   )}
                 </g>
               );
@@ -870,38 +1038,151 @@ function PdfEditablePage({
             )}
 
             {draftRect && (
-              <rect
-                x={Math.min(draftRect.startX, draftRect.endX) * pageSize.width}
-                y={Math.min(draftRect.startY, draftRect.endY) * pageSize.height}
-                width={
-                  Math.abs(draftRect.endX - draftRect.startX) * pageSize.width
-                }
-                height={
-                  Math.abs(draftRect.endY - draftRect.startY) * pageSize.height
-                }
-                fill={
-                  activeTool === 'redact'
-                    ? '#FFFFFF'
-                    : activeTool === 'highlight'
-                      ? activeColor
-                      : 'none'
-                }
-                fillOpacity={
-                  activeTool === 'redact'
-                    ? 0.92
-                    : activeTool === 'highlight'
-                      ? 0.34
-                      : 0
-                }
-                stroke={activeTool === 'redact' ? '#94a3b8' : activeColor}
-                strokeWidth={1.5}
-                strokeDasharray="4 3"
-              />
+              <>
+                {activeTool === 'circle' ? (
+                  <ellipse
+                    cx={
+                      ((draftRect.startX + draftRect.endX) / 2) * pageSize.width
+                    }
+                    cy={
+                      ((draftRect.startY + draftRect.endY) / 2) * pageSize.height
+                    }
+                    rx={
+                      (Math.abs(draftRect.endX - draftRect.startX) / 2) *
+                      pageSize.width
+                    }
+                    ry={
+                      (Math.abs(draftRect.endY - draftRect.startY) / 2) *
+                      pageSize.height
+                    }
+                    fill="none"
+                    stroke={activeColor}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                  />
+                ) : activeTool === 'line' || activeTool === 'arrow' ? (
+                  <line
+                    x1={Math.min(draftRect.startX, draftRect.endX) * pageSize.width}
+                    y1={((draftRect.startY + draftRect.endY) / 2) * pageSize.height}
+                    x2={Math.max(draftRect.startX, draftRect.endX) * pageSize.width}
+                    y2={((draftRect.startY + draftRect.endY) / 2) * pageSize.height}
+                    stroke={activeColor}
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                  />
+                ) : (
+                  <rect
+                    x={Math.min(draftRect.startX, draftRect.endX) * pageSize.width}
+                    y={Math.min(draftRect.startY, draftRect.endY) * pageSize.height}
+                    width={
+                      Math.abs(draftRect.endX - draftRect.startX) * pageSize.width
+                    }
+                    height={
+                      Math.abs(draftRect.endY - draftRect.startY) * pageSize.height
+                    }
+                    fill={
+                      activeTool === 'redact'
+                        ? '#FFFFFF'
+                        : activeTool === 'highlight'
+                          ? activeColor
+                          : 'none'
+                    }
+                    fillOpacity={
+                      activeTool === 'redact'
+                        ? 0.92
+                        : activeTool === 'highlight'
+                          ? 0.34
+                          : 0
+                    }
+                    stroke={activeTool === 'redact' ? '#94a3b8' : activeColor}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                  />
+                )}
+              </>
             )}
           </svg>
 
+          {imageAnns.map((ann) => {
+            const isSelected = selectedId === ann.id;
+            return (
+              <div
+                key={ann.id}
+                onPointerDown={(e) => {
+                  if (!isAnnotating) return;
+                  e.stopPropagation();
+                  onSelectAnnotation(ann.id);
+                  if (activeTool === 'select') {
+                    boxTransformRef.current = {
+                      id: ann.id,
+                      mode: 'move',
+                      startClientX: e.clientX,
+                      startClientY: e.clientY,
+                      origXPct: ann.xPct,
+                      origYPct: ann.yPct,
+                      origWPct: ann.wPct,
+                      origHPct: ann.hPct,
+                    };
+                  }
+                }}
+                style={{
+                  left: `${ann.xPct * 100}%`,
+                  top: `${ann.yPct * 100}%`,
+                  width: `${ann.wPct * 100}%`,
+                  height: `${ann.hPct * 100}%`,
+                  opacity: ann.opacity ?? 1,
+                  zIndex: (ann.zIndex ?? 1) + 2,
+                }}
+                className={`absolute ${
+                  isAnnotating && activeTool === 'select'
+                    ? 'pointer-events-auto cursor-move'
+                    : isAnnotating
+                      ? 'pointer-events-auto'
+                      : ''
+                } ${
+                  isSelected && isAnnotating
+                    ? 'ring-2 ring-[#EA3D2F] ring-offset-1'
+                    : ''
+                }`}
+              >
+                <img
+                  src={ann.src}
+                  alt="Imagen PDF"
+                  draggable={false}
+                  className="h-full w-full object-fill pointer-events-none select-none"
+                />
+                {isSelected && isAnnotating && activeTool === 'select' && (
+                  <button
+                    type="button"
+                    aria-label="Cambiar tamaño de imagen"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      boxTransformRef.current = {
+                        id: ann.id,
+                        mode: 'resize',
+                        startClientX: e.clientX,
+                        startClientY: e.clientY,
+                        origXPct: ann.xPct,
+                        origYPct: ann.yPct,
+                        origWPct: ann.wPct,
+                        origHPct: ann.hPct,
+                      };
+                    }}
+                    className="absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-md border-2 border-[#EA3D2F] bg-white shadow"
+                  />
+                )}
+              </div>
+            );
+          })}
+
           {textAnns.map((ann) => {
             const isSelected = selectedId === ann.id;
+            const fontCss =
+              ann.fontFamily === 'serif'
+                ? 'Georgia, "Times New Roman", serif'
+                : ann.fontFamily === 'mono'
+                  ? '"Courier New", Courier, monospace'
+                  : 'Helvetica, Arial, sans-serif';
             return (
               <div
                 key={ann.id}
@@ -927,9 +1208,16 @@ function PdfEditablePage({
                   lineHeight: 1.25,
                   color: ann.color,
                   fontWeight: ann.bold ? 700 : 400,
+                  fontStyle: ann.italic ? 'italic' : 'normal',
                   backgroundColor: ann.bgFill || 'transparent',
                   padding: ann.bgFill ? '2px 4px' : '1px 2px',
-                  fontFamily: 'Helvetica, Arial, sans-serif',
+                  fontFamily: fontCss,
+                  opacity: ann.opacity ?? 1,
+                  transform: ann.rotationDeg
+                    ? `rotate(${ann.rotationDeg}deg)`
+                    : undefined,
+                  transformOrigin: 'top left',
+                  zIndex: (ann.zIndex ?? 1) + 4,
                 }}
                 className={`absolute max-w-[85%] whitespace-pre-wrap break-words rounded transition-shadow ${
                   isAnnotating ? 'pointer-events-auto cursor-move' : ''
@@ -1037,6 +1325,8 @@ export default function WpsPdfViewer({
   const [isApplyingEdits, setIsApplyingEdits] = useState(false);
   const [isExtractingPages, setIsExtractingPages] = useState(false);
   const [editNotice, setEditNotice] = useState<string | null>(null);
+  const pdfImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [copiedDocStyle, setCopiedDocStyle] = useState<Record<string, string> | null>(null);
 
   const [viewportWidth, setViewportWidth] = useState(
     typeof window !== 'undefined' ? window.innerWidth : 1024,
@@ -1424,6 +1714,92 @@ export default function WpsPdfViewer({
     runWordCommand('insertHTML', html);
   };
 
+  const applyInlineStyle = (styles: Record<string, string>) => {
+    if (editSubMode !== 'text') {
+      void handleSwitchEditSubMode('text');
+      return;
+    }
+    const targetPage = activeEditorPageRef.current || currentPage || 1;
+    const el = editorElementsRef.current[targetPage];
+    if (!el) return;
+
+    runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      if (!isRangeInsideElement(range, el)) return;
+
+      if (range.collapsed) {
+        const anchorEl =
+          range.startContainer instanceof HTMLElement
+            ? range.startContainer
+            : range.startContainer.parentElement;
+        const targetEl = anchorEl?.closest(
+          'span, p, h1, h2, h3, li, blockquote',
+        ) as HTMLElement | null;
+        if (targetEl && el.contains(targetEl) && targetEl !== el) {
+          Object.entries(styles).forEach(([k, v]) => {
+            targetEl.style.setProperty(
+              k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`),
+              v,
+            );
+          });
+        }
+        return;
+      }
+
+      const span = window.document.createElement('span');
+      Object.entries(styles).forEach(([k, v]) => {
+        span.style.setProperty(
+          k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`),
+          v,
+        );
+      });
+      try {
+        const contents = range.extractContents();
+        span.appendChild(contents);
+        range.insertNode(span);
+        const nextRange = window.document.createRange();
+        nextRange.selectNodeContents(span);
+        sel.removeAllRanges();
+        sel.addRange(nextRange);
+        savedRangeRef.current = nextRange.cloneRange();
+      } catch {
+        // Ignore non-contiguous range edge cases
+      }
+    });
+    handlePageHtmlChange(targetPage, el.innerHTML, true);
+    syncInlineFormats();
+  };
+
+  const handleCopyDocStyle = () => {
+    const targetPage = activeEditorPageRef.current || currentPage || 1;
+    const activeEl = editorElementsRef.current[targetPage];
+    const sel = window.getSelection();
+    const anchor = sel?.anchorNode;
+    const el =
+      anchor instanceof HTMLElement
+        ? anchor
+        : anchor?.parentElement ?? activeEl;
+    if (!el) return;
+    const computed = window.getComputedStyle(el);
+    setCopiedDocStyle({
+      fontFamily: computed.fontFamily,
+      fontSize: computed.fontSize,
+      color: computed.color,
+      fontWeight: computed.fontWeight,
+      fontStyle: computed.fontStyle,
+      textDecoration: computed.textDecorationLine,
+      letterSpacing: computed.letterSpacing,
+      textTransform: computed.textTransform,
+    });
+  };
+
+  const handleApplyCopiedDocStyle = () => {
+    if (!copiedDocStyle) return;
+    applyInlineStyle(copiedDocStyle);
+  };
+
   const handleJumpToNextSpellError = () => {
     if (!spellCheckEnabled) {
       setSpellCheckEnabled(true);
@@ -1577,6 +1953,111 @@ export default function WpsPdfViewer({
       });
     },
     [doc.pdfBase64, doc.title, history],
+  );
+
+  const handleDuplicateAnnotation = useCallback(
+    (ann: PdfAnnotation) => {
+      const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const cloned: PdfAnnotation =
+        ann.kind === 'draw'
+          ? {
+              ...ann,
+              id,
+              points: ann.points.map((pt) => ({
+                xPct: Math.min(0.98, pt.xPct + 0.03),
+                yPct: Math.min(0.98, pt.yPct + 0.03),
+              })),
+              zIndex: (ann.zIndex ?? 1) + 1,
+            }
+          : {
+              ...ann,
+              id,
+              xPct: Math.min(0.88, ann.xPct + 0.03),
+              yPct: Math.min(0.9, ann.yPct + 0.03),
+              zIndex: (ann.zIndex ?? 1) + 1,
+            };
+      handleAddAnnotation(cloned);
+      setSelectedId(id);
+    },
+    [handleAddAnnotation],
+  );
+
+  const handleLayerAnnotation = useCallback(
+    (ann: PdfAnnotation, dir: 'up' | 'down') => {
+      const cur = ann.zIndex ?? 1;
+      const nextZ = dir === 'up' ? cur + 1 : Math.max(0, cur - 1);
+      handleUpdateAnnotation(ann.id, { zIndex: nextZ });
+    },
+    [handleUpdateAnnotation],
+  );
+
+  const handleUploadPdfImage = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      const rawDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+        reader.readAsDataURL(file);
+      });
+      if (!rawDataUrl) return;
+
+      // Normalize any format (e.g. WebP/GIF/AVIF) to PNG & measure aspect ratio
+      const { pngUrl, aspect } = await new Promise<{
+        pngUrl: string;
+        aspect: number;
+      }>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1200;
+          const scaleRatio = Math.min(
+            1,
+            maxDim / Math.max(img.naturalWidth || 1, img.naturalHeight || 1),
+          );
+          const w = Math.max(16, Math.round((img.naturalWidth || 240) * scaleRatio));
+          const h = Math.max(16, Math.round((img.naturalHeight || 180) * scaleRatio));
+          const isPngOrJpg = /^data:image\/(png|jpeg|jpg);base64,/i.test(rawDataUrl);
+          if (isPngOrJpg && scaleRatio >= 1) {
+            resolve({ pngUrl: rawDataUrl, aspect: w / h });
+            return;
+          }
+          const canvas = window.document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve({ pngUrl: canvas.toDataURL('image/png'), aspect: w / h });
+          } else {
+            resolve({ pngUrl: rawDataUrl, aspect: 1.33 });
+          }
+        };
+        img.onerror = () => resolve({ pngUrl: rawDataUrl, aspect: 1.33 });
+        img.src = rawDataUrl;
+      });
+
+      const wPct = 0.34;
+      const hPct = Math.max(0.08, Math.min(0.45, (wPct / Math.max(0.25, aspect)) * 0.72));
+      const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const imgAnn: PdfImageAnnotation = {
+        id,
+        kind: 'image',
+        pageNumber: currentPage || 1,
+        xPct: 0.33,
+        yPct: 0.32,
+        wPct,
+        hPct,
+        src: pngUrl,
+        opacity: 1,
+        zIndex: draftAnnotationsRef.current.length + 1,
+      };
+      handleAddAnnotation(imgAnn);
+      setActiveTool('select');
+      setSelectedId(id);
+    },
+    [currentPage, handleAddAnnotation],
   );
 
   const commitAllEditsAndGetBytes = async (): Promise<Uint8Array> => {
@@ -2051,6 +2532,13 @@ export default function WpsPdfViewer({
             {editSubMode === 'annotate' ? (
               <>
                 <div className="mx-1 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+                <input
+                  ref={pdfImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => void handleUploadPdfImage(e)}
+                />
                 {(
                   [
                     { id: 'select', label: 'Mover', Icon: MousePointer },
@@ -2059,6 +2547,9 @@ export default function WpsPdfViewer({
                     { id: 'highlight', label: 'Resaltar', Icon: Highlighter },
                     { id: 'redact', label: 'Tapar', Icon: Eraser },
                     { id: 'box', label: 'Recuadro', Icon: Square },
+                    { id: 'circle', label: 'Círculo', Icon: Circle },
+                    { id: 'arrow', label: 'Flecha', Icon: ArrowRight },
+                    { id: 'line', label: 'Línea', Icon: Minus },
                   ] as const
                 ).map(({ id, label, Icon }) => {
                   const active = activeTool === id;
@@ -2067,7 +2558,7 @@ export default function WpsPdfViewer({
                       key={id}
                       type="button"
                       onClick={() => setActiveTool(id)}
-                      className={`inline-flex min-h-[34px] shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                      className={`inline-flex min-h-[34px] shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors ${
                         active
                           ? 'bg-[#EA3D2F] text-white'
                           : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
@@ -2078,6 +2569,15 @@ export default function WpsPdfViewer({
                     </button>
                   );
                 })}
+
+                <button
+                  type="button"
+                  onClick={() => pdfImageInputRef.current?.click()}
+                  className="inline-flex min-h-[34px] shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <ImageIcon className="h-3.5 w-3.5 text-purple-600" />
+                  <span>Imagen</span>
+                </button>
 
                 <div className="mx-1 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
 
@@ -2111,6 +2611,27 @@ export default function WpsPdfViewer({
                         />
                       );
                     })}
+                    <label
+                      title="Color personalizado"
+                      className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-gradient-to-tr from-rose-500 via-amber-400 to-indigo-500 dark:border-slate-600"
+                    >
+                      <input
+                        type="color"
+                        value={toolColor}
+                        onChange={(e) => {
+                          const c = e.target.value;
+                          if (activeTool === 'highlight') {
+                            setHighlightColor(c);
+                          } else {
+                            setActiveColor(c);
+                          }
+                          if (selectedAnnotation) {
+                            handleUpdateAnnotation(selectedAnnotation.id, { color: c });
+                          }
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
                   </div>
                 )}
 
@@ -2287,10 +2808,13 @@ export default function WpsPdfViewer({
                     'Arrastra sobre el documento para resaltar áreas importantes.'}
                   {activeTool === 'redact' &&
                     'Arrastra un recuadro blanco para tapar contenido previo del PDF.'}
-                  {activeTool === 'box' &&
-                    'Arrastra para dibujar un recuadro de énfasis.'}
+                  {(activeTool === 'box' ||
+                    activeTool === 'circle' ||
+                    activeTool === 'arrow' ||
+                    activeTool === 'line') &&
+                    'Arrastra sobre la página para dibujar la forma. Usa "Mover" para escalar o reubicar.'}
                   {activeTool === 'select' &&
-                    'Toca cualquier anotación para editarla, moverla o eliminarla.'}
+                    'Toca cualquier objeto para moverlo, escalarlo con la esquina o editar su estilo Canva.'}
                 </div>
               )}
 
@@ -2390,35 +2914,80 @@ export default function WpsPdfViewer({
         />
       )}
 
-      {/* Contextual Floating Inspector for Selected Canvas Annotation */}
+      {/* Contextual Floating Canva Inspector for Selected PDF Annotation */}
       {editMode && editSubMode === 'annotate' && selectedAnnotation && (
-        <div className="no-print fixed bottom-[56px] left-1/2 z-30 w-[calc(100%-1rem)] max-w-xl -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95">
-          {selectedAnnotation.kind === 'text' ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  Editar texto (Pág. {selectedAnnotation.pageNumber}) — Arrastra sobre la página para mover
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteAnnotation(selectedAnnotation.id)}
-                    aria-label="Eliminar texto"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(null)}
-                    aria-label="Cerrar editor de texto"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+        <div className="no-print fixed bottom-[56px] left-1/2 z-30 max-h-[58vh] w-[calc(100%-1rem)] max-w-xl -translate-x-1/2 overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              {selectedAnnotation.kind === 'text'
+                ? `Texto Canva (Pág. ${selectedAnnotation.pageNumber})`
+                : selectedAnnotation.kind === 'image'
+                  ? `Imagen / Sello (Pág. ${selectedAnnotation.pageNumber})`
+                  : selectedAnnotation.kind === 'circle'
+                    ? 'Círculo / Óvalo'
+                    : selectedAnnotation.kind === 'arrow'
+                      ? 'Flecha'
+                      : selectedAnnotation.kind === 'line'
+                        ? 'Línea'
+                        : selectedAnnotation.kind === 'draw'
+                          ? 'Trazo / Firma'
+                          : selectedAnnotation.kind === 'highlight'
+                            ? 'Resaltado'
+                            : selectedAnnotation.kind === 'redact'
+                              ? 'Corrector blanco'
+                              : 'Recuadro'}{' '}
+              · Capa {selectedAnnotation.zIndex ?? 1}
+            </span>
 
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handleLayerAnnotation(selectedAnnotation, 'down')}
+                title="Bajar capa"
+                aria-label="Bajar capa"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLayerAnnotation(selectedAnnotation, 'up')}
+                title="Subir capa"
+                aria-label="Subir capa"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDuplicateAnnotation(selectedAnnotation)}
+                title="Duplicar elemento"
+                aria-label="Duplicar elemento"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteAnnotation(selectedAnnotation.id)}
+                aria-label="Eliminar elemento"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                aria-label="Cerrar inspector"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {selectedAnnotation.kind === 'text' && (
+            <div className="space-y-2.5">
               <textarea
                 rows={2}
                 value={selectedAnnotation.text}
@@ -2431,135 +3000,295 @@ export default function WpsPdfViewer({
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#EA3D2F] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
 
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    { id: 'sans', label: 'Sans' },
+                    { id: 'serif', label: 'Serif' },
+                    { id: 'mono', label: 'Mono' },
+                  ] as const
+                ).map((f) => (
                   <button
+                    key={f.id}
                     type="button"
-                    onClick={() => {
-                      const nextSize = Math.max(
-                        8,
-                        selectedAnnotation.fontSize - 2,
-                      );
-                      setActiveFontSize(nextSize);
+                    onClick={() =>
                       handleUpdateAnnotation(selectedAnnotation.id, {
-                        fontSize: nextSize,
-                      });
-                    }}
-                    className="h-8 rounded-lg border border-slate-200 px-2 font-mono text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    A-
-                  </button>
-                  <span className="w-10 text-center font-mono text-xs tabular-nums text-slate-600 dark:text-slate-300">
-                    {selectedAnnotation.fontSize}pt
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextSize = Math.min(
-                        48,
-                        selectedAnnotation.fontSize + 2,
-                      );
-                      setActiveFontSize(nextSize);
-                      handleUpdateAnnotation(selectedAnnotation.id, {
-                        fontSize: nextSize,
-                      });
-                    }}
-                    className="h-8 rounded-lg border border-slate-200 px-2 font-mono text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    A+
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextBold = !selectedAnnotation.bold;
-                      setActiveBold(nextBold);
-                      handleUpdateAnnotation(selectedAnnotation.id, {
-                        bold: nextBold,
-                      });
-                    }}
-                    aria-label="Negrita"
-                    className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
-                      selectedAnnotation.bold
+                        fontFamily: f.id,
+                      })
+                    }
+                    className={`h-8 rounded-lg border px-2 text-xs font-medium ${
+                      (selectedAnnotation.fontFamily ?? 'sans') === f.id
                         ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/40 dark:text-red-300'
                         : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'
                     }`}
                   >
-                    <Bold className="h-3.5 w-3.5" />
+                    {f.label}
                   </button>
+                ))}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextBg = selectedAnnotation.bgFill
-                        ? undefined
-                        : '#FFFFFF';
-                      setActiveWhiteBg(Boolean(nextBg));
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextSize = Math.max(8, selectedAnnotation.fontSize - 2);
+                    setActiveFontSize(nextSize);
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      fontSize: nextSize,
+                    });
+                  }}
+                  className="h-8 rounded-lg border border-slate-200 px-2 font-mono text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  A-
+                </button>
+                <span className="w-10 text-center font-mono text-xs tabular-nums text-slate-600 dark:text-slate-300">
+                  {selectedAnnotation.fontSize}pt
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextSize = Math.min(54, selectedAnnotation.fontSize + 2);
+                    setActiveFontSize(nextSize);
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      fontSize: nextSize,
+                    });
+                  }}
+                  className="h-8 rounded-lg border border-slate-200 px-2 font-mono text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  A+
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextBold = !selectedAnnotation.bold;
+                    setActiveBold(nextBold);
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      bold: nextBold,
+                    });
+                  }}
+                  aria-label="Negrita"
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                    selectedAnnotation.bold
+                      ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/40 dark:text-red-300'
+                      : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <Bold className="h-3.5 w-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      italic: !selectedAnnotation.italic,
+                    })
+                  }
+                  aria-label="Cursiva"
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                    selectedAnnotation.italic
+                      ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/40 dark:text-red-300'
+                      : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <Italic className="h-3.5 w-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextBg = selectedAnnotation.bgFill ? undefined : '#FFFFFF';
+                    setActiveWhiteBg(Boolean(nextBg));
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      bgFill: nextBg,
+                    });
+                  }}
+                  className={`h-8 rounded-lg border px-2 text-xs font-medium ${
+                    selectedAnnotation.bgFill
+                      ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/40 dark:text-red-300'
+                      : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  Fondo blanco
+                </button>
+              </div>
+
+              <CanvaColorSwatchRow
+                label="Color de texto"
+                value={selectedAnnotation.color}
+                onChange={(color) => {
+                  setActiveColor(color);
+                  handleUpdateAnnotation(selectedAnnotation.id, { color });
+                }}
+              />
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-500">
+                    <span>Opacidad</span>
+                    <span className="font-mono tabular-nums">
+                      {Math.round((selectedAnnotation.opacity ?? 1) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={20}
+                    max={100}
+                    value={Math.round((selectedAnnotation.opacity ?? 1) * 100)}
+                    onChange={(e) =>
                       handleUpdateAnnotation(selectedAnnotation.id, {
-                        bgFill: nextBg,
-                      });
-                    }}
-                    className={`h-8 rounded-lg border px-2 text-xs font-medium ${
-                      selectedAnnotation.bgFill
-                        ? 'border-[#EA3D2F] bg-red-50 text-[#EA3D2F] dark:bg-red-950/40 dark:text-red-300'
-                        : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    Fondo blanco
-                  </button>
+                        opacity: Number(e.target.value) / 100,
+                      })
+                    }
+                    className="w-full accent-[#EA3D2F]"
+                  />
                 </div>
-
-                <div className="flex items-center gap-1.5">
-                  {TEXT_COLORS.map((swatch) => (
-                    <button
-                      key={swatch}
-                      type="button"
-                      onClick={() => {
-                        setActiveColor(swatch);
-                        handleUpdateAnnotation(selectedAnnotation.id, {
-                          color: swatch,
-                        });
-                      }}
-                      style={{ backgroundColor: swatch }}
-                      aria-label={`Color ${swatch}`}
-                      className={`h-6 w-6 rounded-full border ${
-                        selectedAnnotation.color === swatch
-                          ? 'border-[#EA3D2F] ring-2 ring-[#EA3D2F]/30'
-                          : 'border-slate-300 dark:border-slate-600'
-                      }`}
-                    />
-                  ))}
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-500">
+                    <span>Rotación</span>
+                    <span className="font-mono tabular-nums">
+                      {selectedAnnotation.rotationDeg ?? 0}°
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-45}
+                    max={45}
+                    step={5}
+                    value={selectedAnnotation.rotationDeg ?? 0}
+                    onChange={(e) =>
+                      handleUpdateAnnotation(selectedAnnotation.id, {
+                        rotationDeg: Number(e.target.value),
+                      })
+                    }
+                    className="w-full accent-[#EA3D2F]"
+                  />
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
-                {selectedAnnotation.kind === 'draw'
-                  ? 'Trazo / Firma seleccionado'
-                  : selectedAnnotation.kind === 'highlight'
-                    ? 'Resaltado seleccionado'
-                    : selectedAnnotation.kind === 'redact'
-                      ? 'Recuadro corrector blanco'
-                      : 'Recuadro seleccionado'}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDeleteAnnotation(selectedAnnotation.id)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>Eliminar</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(null)}
-                  aria-label="Deseleccionar"
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+          )}
+
+          {selectedAnnotation.kind === 'image' && (
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-medium text-slate-500">Ancho:</span>
+                {[0.2, 0.35, 0.55, 0.8].map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => {
+                      const ratio =
+                        selectedAnnotation.hPct / Math.max(0.05, selectedAnnotation.wPct);
+                      handleUpdateAnnotation(selectedAnnotation.id, {
+                        wPct: w,
+                        hPct: Math.min(0.85, Math.max(0.05, w * ratio)),
+                      });
+                    }}
+                    className="h-8 rounded-lg border border-slate-200 px-2.5 font-mono text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {Math.round(w * 100)}%
+                  </button>
+                ))}
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-500">
+                  <span>Opacidad</span>
+                  <span className="font-mono tabular-nums">
+                    {Math.round((selectedAnnotation.opacity ?? 1) * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={20}
+                  max={100}
+                  value={Math.round((selectedAnnotation.opacity ?? 1) * 100)}
+                  onChange={(e) =>
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      opacity: Number(e.target.value) / 100,
+                    })
+                  }
+                  className="w-full accent-[#EA3D2F]"
+                />
+              </div>
+            </div>
+          )}
+
+          {selectedAnnotation.kind !== 'text' && selectedAnnotation.kind !== 'image' && (
+            <div className="space-y-2.5">
+              {selectedAnnotation.kind !== 'redact' && (
+                <CanvaColorSwatchRow
+                  label={
+                    selectedAnnotation.kind === 'box' ||
+                    selectedAnnotation.kind === 'circle'
+                      ? 'Color de borde / trazo'
+                      : 'Color'
+                  }
+                  value={selectedAnnotation.color}
+                  onChange={(color) => {
+                    setActiveColor(color);
+                    handleUpdateAnnotation(selectedAnnotation.id, { color });
+                  }}
+                />
+              )}
+
+              {(selectedAnnotation.kind === 'box' ||
+                selectedAnnotation.kind === 'circle') && (
+                <CanvaColorSwatchRow
+                  label="Color de relleno"
+                  value={selectedAnnotation.fillColor || 'transparent'}
+                  allowTransparent
+                  onChange={(fillColor) =>
+                    handleUpdateAnnotation(selectedAnnotation.id, {
+                      fillColor: fillColor === 'transparent' ? undefined : fillColor,
+                    })
+                  }
+                />
+              )}
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                {selectedAnnotation.kind !== 'highlight' &&
+                  selectedAnnotation.kind !== 'redact' && (
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-500">
+                        <span>Grosor</span>
+                        <span className="font-mono tabular-nums">
+                          {selectedAnnotation.strokeWidth ?? 2}px
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={8}
+                        step={0.5}
+                        value={selectedAnnotation.strokeWidth ?? 2}
+                        onChange={(e) =>
+                          handleUpdateAnnotation(selectedAnnotation.id, {
+                            strokeWidth: Number(e.target.value),
+                          })
+                        }
+                        className="w-full accent-[#EA3D2F]"
+                      />
+                    </div>
+                  )}
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-500">
+                    <span>Opacidad</span>
+                    <span className="font-mono tabular-nums">
+                      {Math.round((selectedAnnotation.opacity ?? 1) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={20}
+                    max={100}
+                    value={Math.round((selectedAnnotation.opacity ?? 1) * 100)}
+                    onChange={(e) =>
+                      handleUpdateAnnotation(selectedAnnotation.id, {
+                        opacity: Number(e.target.value) / 100,
+                      })
+                    }
+                    className="w-full accent-[#EA3D2F]"
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -2721,6 +3450,10 @@ export default function WpsPdfViewer({
           activeFormats={inlineFormats}
           onRunCommand={runWordCommand}
           onInsertHtml={insertHtmlAtCursor}
+          onApplyInlineStyle={applyInlineStyle}
+          onCopyStyle={handleCopyDocStyle}
+          hasCopiedStyle={Boolean(copiedDocStyle)}
+          onApplyCopiedStyle={handleApplyCopiedDocStyle}
           spellCheckEnabled={spellCheckEnabled}
           onToggleSpellCheck={() => setSpellCheckEnabled((v) => !v)}
           spellErrorCount={flattenedSpellErrors.length}

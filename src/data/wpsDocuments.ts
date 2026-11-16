@@ -23,6 +23,22 @@ export interface WpsSlideParagraph {
   level?: number;
 }
 
+export type WpsShapeKind =
+  | 'rect'
+  | 'roundRect'
+  | 'ellipse'
+  | 'triangle'
+  | 'star'
+  | 'arrowRight'
+  | 'diamond'
+  | 'badge'
+  | 'line';
+
+export type WpsShadowStyle = 'none' | 'soft' | 'elevated' | 'glow';
+export type WpsTextEffect = 'none' | 'shadow' | 'lift' | 'hollow' | 'splice' | 'background';
+export type WpsImageFilterPreset = 'none' | 'bw' | 'sepia' | 'vivid' | 'warm' | 'cool' | 'blur';
+export type WpsChartKind = 'bar' | 'horizontalBar' | 'line' | 'donut';
+
 export type WpsSlideElement =
   | {
       id: string;
@@ -33,7 +49,24 @@ export type WpsSlideElement =
       hPct: number;
       fillColor?: string;
       borderColor?: string;
+      borderWidthPx?: number;
+      borderStyle?: 'solid' | 'dashed' | 'dotted';
+      borderRadiusPx?: number;
       rotationDeg?: number;
+      opacity?: number;
+      locked?: boolean;
+      flippedX?: boolean;
+      flippedY?: boolean;
+      shadow?: WpsShadowStyle;
+      groupId?: string;
+      fontFamily?: string;
+      fontSizePt?: number;
+      letterSpacingEm?: number;
+      lineHeight?: number;
+      textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+      textEffect?: WpsTextEffect;
+      effectColor?: string;
+      verticalAlign?: 'top' | 'middle' | 'bottom';
       paragraphs: WpsSlideParagraph[];
       richHtml?: string;
       isTitle?: boolean;
@@ -49,6 +82,19 @@ export type WpsSlideElement =
       src: string;
       alt?: string;
       rotationDeg?: number;
+      opacity?: number;
+      locked?: boolean;
+      flippedX?: boolean;
+      flippedY?: boolean;
+      borderColor?: string;
+      borderWidthPx?: number;
+      borderRadiusPx?: number;
+      shadow?: WpsShadowStyle;
+      groupId?: string;
+      filterPreset?: WpsImageFilterPreset;
+      brightness?: number;
+      contrast?: number;
+      saturate?: number;
       imageFit?: 'contain' | 'cover' | 'fill';
       zIndex: number;
     }
@@ -59,6 +105,16 @@ export type WpsSlideElement =
       yPct: number;
       wPct: number;
       hPct: number;
+      rotationDeg?: number;
+      opacity?: number;
+      locked?: boolean;
+      borderRadiusPx?: number;
+      headerBgColor?: string;
+      headerTextColor?: string;
+      borderColor?: string;
+      cellBgColor?: string;
+      shadow?: WpsShadowStyle;
+      groupId?: string;
       headers: string[];
       rows: string[][];
       zIndex: number;
@@ -71,9 +127,19 @@ export type WpsSlideElement =
       wPct: number;
       hPct: number;
       fillColor?: string;
+      fillGradient?: string;
       borderColor?: string;
+      borderWidthPx?: number;
+      borderStyle?: 'solid' | 'dashed' | 'dotted';
+      borderRadiusPx?: number;
       rotationDeg?: number;
-      shapeKind?: 'rect' | 'roundRect' | 'ellipse' | 'line';
+      opacity?: number;
+      locked?: boolean;
+      flippedX?: boolean;
+      flippedY?: boolean;
+      shadow?: WpsShadowStyle;
+      groupId?: string;
+      shapeKind?: WpsShapeKind;
       zIndex: number;
     }
   | {
@@ -83,6 +149,15 @@ export type WpsSlideElement =
       yPct: number;
       wPct: number;
       hPct: number;
+      rotationDeg?: number;
+      opacity?: number;
+      locked?: boolean;
+      fillColor?: string;
+      borderColor?: string;
+      borderRadiusPx?: number;
+      shadow?: WpsShadowStyle;
+      groupId?: string;
+      chartKind?: WpsChartKind;
       title?: string;
       series: {
         name: string;
@@ -97,6 +172,14 @@ export type WpsSlideElement =
       yPct: number;
       wPct: number;
       hPct: number;
+      rotationDeg?: number;
+      opacity?: number;
+      locked?: boolean;
+      fillColor?: string;
+      borderColor?: string;
+      borderRadiusPx?: number;
+      shadow?: WpsShadowStyle;
+      groupId?: string;
       items: string[];
       zIndex: number;
     };
@@ -115,6 +198,7 @@ export interface WpsSlide {
   slideWidthPx?: number;
   slideHeightPx?: number;
   backgroundColor?: string;
+  backgroundGradient?: string;
   backgroundImage?: string;
   elements?: WpsSlideElement[];
 }

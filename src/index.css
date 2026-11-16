@@ -185,6 +185,57 @@
   overflow-wrap: anywhere;
 }
 
+.wps-doc-canvas .alx-canva-callout {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.85rem;
+  padding: 0.9rem 1.1rem;
+  margin: 0.9rem 0;
+  background-color: #f8fafc;
+}
+
+.dark .wps-doc-canvas .alx-canva-callout {
+  border-color: #334155;
+  background-color: #1e293b;
+}
+
+.wps-doc-canvas .alx-canva-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin: 0.9rem 0;
+}
+
+@media (max-width: 520px) {
+  .wps-doc-canvas .alx-canva-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wps-doc-canvas .alx-canva-col {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  background-color: rgba(248, 250, 252, 0.7);
+}
+
+.dark .wps-doc-canvas .alx-canva-col {
+  border-color: #334155;
+  background-color: rgba(15, 23, 42, 0.6);
+}
+
+.wps-doc-canvas .alx-canva-kpi {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+  padding: 1rem 1.15rem;
+  margin: 0.9rem 0;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(37, 99, 235, 0.06));
+}
+
+.dark .wps-doc-canvas .alx-canva-kpi {
+  border-color: #334155;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.18), rgba(37, 99, 235, 0.14));
+}
+
 .alx-spell-wave {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='4' viewBox='0 0 8 4'%3E%3Cpath d='M0 3 Q 2 0.5 4 3 T 8 3' fill='none' stroke='%23ef4444' stroke-width='1.25' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: repeat-x;

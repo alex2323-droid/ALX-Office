@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowLeft,
   Check,
+  Copy,
   Download,
   Eye,
   FileDown,
+  FlipHorizontal,
   Loader2,
   Monitor,
   Pencil,
@@ -12,7 +17,9 @@ import {
   Redo2,
   Search,
   Smartphone,
+  Sparkles,
   SpellCheck,
+  Trash2,
   Undo2,
   X,
 } from 'lucide-react';
@@ -82,9 +89,15 @@ export default function WpsEditorView({
   // View settings
   const [layoutMode, setLayoutMode] = useState<'mobile' | 'page'>('mobile');
   const [eyeCareMode, setEyeCareMode] = useState(false);
+  const [pageBgColor, setPageBgColor] = useState<string>('#FFFFFF');
   const [fontFamily, setFontFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
   const [zoomPercent, setZoomPercent] = useState(100);
   const [lineSpacing, setLineSpacing] = useState<'1.4' | '1.65' | '1.95'>('1.65');
+
+  // Canva Docs Format Painter & Selected Image/Block Node
+  const [copiedDocStyle, setCopiedDocStyle] = useState<Record<string, string> | null>(null);
+  const selectedDomNodeRef = useRef<HTMLElement | null>(null);
+  const [selectedNodeKind, setSelectedNodeKind] = useState<'image' | 'block' | null>(null);
 
   // Active formatting feedback
   const [activeFormats, setActiveFormats] = useState<WordActiveFormats>({
@@ -171,6 +184,8 @@ export default function WpsEditorView({
     setDrawerOpen(false);
     setIgnoredWords(new Set());
     setSpellMenu(null);
+    setSelectedNodeKind(null);
+    selectedDomNodeRef.current = null;
     savedRangeRef.current = null;
     lastAppliedHtmlRef.current = doc.contentHtml;
     if (editorRef.current && editorRef.current.innerHTML !== doc.contentHtml) {
@@ -360,7 +375,7 @@ export default function WpsEditorView({
     if (!el) return;
     if (!isEditing) setIsEditing(true);
 
-    const isBlockInsertion = /<(table|hr|p|h[1-3]|ul|ol|blockquote)\b/i.test(html);
+    const isBlockInsertion = /<(table|hr|p|h[1-3]|ul|ol|blockquote|div)\b/i.test(html);
     window.requestAnimationFrame(() => {
       runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
         if (isBlockInsertion) {
@@ -371,6 +386,95 @@ export default function WpsEditorView({
       persistEditorHtml(true);
       syncFormatState();
     });
+  };
+
+  const applyInlineStyle = (styles: Record<string, string>) => {
+    const el = editorRef.current;
+    if (!el) return;
+    if (!isEditing) setIsEditing(true);
+
+    window.requestAnimationFrame(() => {
+      runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        if (!isRangeInsideElement(range, el)) return;
+
+        if (range.collapsed) {
+          const anchorEl =
+            range.startContainer instanceof HTMLElement
+              ? range.startContainer
+              : range.startContainer.parentElement;
+          const targetEl = anchorEl?.closest('span, p, h1, h2, h3, li, blockquote') as HTMLElement | null;
+          if (targetEl && el.contains(targetEl) && targetEl !== el) {
+            Object.entries(styles).forEach(([k, v]) => {
+              targetEl.style.setProperty(
+                k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`),
+                v,
+              );
+            });
+          }
+          return;
+        }
+
+        const span = window.document.createElement('span');
+        Object.entries(styles).forEach(([k, v]) => {
+          span.style.setProperty(
+            k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`),
+            v,
+          );
+        });
+        try {
+          const contents = range.extractContents();
+          span.appendChild(contents);
+          range.insertNode(span);
+          const nextRange = window.document.createRange();
+          nextRange.selectNodeContents(span);
+          sel.removeAllRanges();
+          sel.addRange(nextRange);
+          savedRangeRef.current = nextRange.cloneRange();
+        } catch {
+          // Ignore non-contiguous range edge cases
+        }
+      });
+      persistEditorHtml(true);
+      syncFormatState();
+    });
+  };
+
+  const handleCopyDocStyle = () => {
+    const sel = window.getSelection();
+    const anchor = sel?.anchorNode;
+    const el =
+      anchor instanceof HTMLElement ? anchor : anchor?.parentElement ?? editorRef.current;
+    if (!el) return;
+    const computed = window.getComputedStyle(el);
+    setCopiedDocStyle({
+      fontFamily: computed.fontFamily,
+      fontSize: computed.fontSize,
+      color: computed.color,
+      fontWeight: computed.fontWeight,
+      fontStyle: computed.fontStyle,
+      textDecoration: computed.textDecorationLine,
+      letterSpacing: computed.letterSpacing,
+      textTransform: computed.textTransform,
+    });
+  };
+
+  const handleApplyCopiedDocStyle = () => {
+    if (!copiedDocStyle) return;
+    applyInlineStyle(copiedDocStyle);
+    setCopiedDocStyle(null);
+  };
+
+  const mutateSelectedDomNode = (mutator: (node: HTMLElement) => void) => {
+    const node = selectedDomNodeRef.current;
+    if (!node || !node.isConnected) {
+      setSelectedNodeKind(null);
+      return;
+    }
+    mutator(node);
+    persistEditorHtml(true);
   };
 
   // Find & Replace counting + replacement
@@ -476,6 +580,26 @@ export default function WpsEditorView({
       hideSoftKeyboard();
       persistEditorHtml(true);
       return;
+    }
+
+    if (target instanceof HTMLImageElement && editorRef.current?.contains(target)) {
+      selectedDomNodeRef.current = target;
+      setSelectedNodeKind('image');
+      hideSoftKeyboard();
+      return;
+    }
+
+    if (target instanceof HTMLElement) {
+      const canvaBlock = target.closest(
+        '.alx-canva-callout, .alx-canva-kpi, .alx-canva-cols',
+      ) as HTMLElement | null;
+      if (canvaBlock && editorRef.current?.contains(canvaBlock)) {
+        selectedDomNodeRef.current = canvaBlock;
+        setSelectedNodeKind('block');
+      } else {
+        selectedDomNodeRef.current = null;
+        setSelectedNodeKind(null);
+      }
     }
 
     if (!spellCheckEnabled) return;
@@ -963,11 +1087,19 @@ export default function WpsEditorView({
               fontFamily: fontStack,
               fontSize: printViewMode ? '11pt' : `${(16 * zoomPercent) / 100}px`,
               lineHeight: printViewMode ? '1.6' : lineSpacing,
+              ...(pageBgColor !== '#FFFFFF' && !eyeCareMode && !printViewMode
+                ? {
+                    backgroundColor: pageBgColor,
+                    color: pageBgColor === '#0F2744' ? '#F8FAFC' : '#0F172A',
+                  }
+                : {}),
             }}
             className={`wps-print-paper relative min-h-[68vh] overflow-x-auto rounded-2xl border p-5 shadow-sm sm:p-10 ${
               eyeCareMode && !printViewMode
                 ? 'border-[#E6D8B8] bg-[#FBF5E6] text-[#3B2F21]'
-                : 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100'
+                : pageBgColor !== '#FFFFFF' && !printViewMode
+                  ? 'border-slate-300/80 dark:border-slate-700'
+                  : 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100'
             }`}
           >
             {/* Non-destructive Spellcheck Wavy Underline Layer */}
@@ -1030,6 +1162,147 @@ export default function WpsEditorView({
         </div>
       </div>
 
+      {/* Floating Canva Image / Block Toolbar */}
+      {!printViewMode && selectedNodeKind && (
+        <div className="no-print fixed bottom-[60px] left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95">
+          {selectedNodeKind === 'image' ? (
+            <>
+              {[25, 50, 75, 100].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() =>
+                    mutateSelectedDomNode((n) => {
+                      n.style.width = `${pct}%`;
+                      n.style.height = 'auto';
+                    })
+                  }
+                  className="min-h-[36px] shrink-0 rounded-lg border border-slate-200 px-2 font-mono text-xs font-medium hover:border-[#7C3AED] dark:border-slate-700"
+                >
+                  {pct}%
+                </button>
+              ))}
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  mutateSelectedDomNode((n) => {
+                    n.style.display = 'block';
+                    n.style.marginLeft = '0';
+                    n.style.marginRight = 'auto';
+                  })
+                }
+                aria-label="Alinear imagen a la izquierda"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <AlignLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  mutateSelectedDomNode((n) => {
+                    n.style.display = 'block';
+                    n.style.marginLeft = 'auto';
+                    n.style.marginRight = 'auto';
+                  })
+                }
+                aria-label="Centrar imagen"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <AlignCenter className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  mutateSelectedDomNode((n) => {
+                    n.style.display = 'block';
+                    n.style.marginLeft = 'auto';
+                    n.style.marginRight = '0';
+                  })
+                }
+                aria-label="Alinear imagen a la derecha"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <AlignRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  mutateSelectedDomNode((n) => {
+                    n.style.borderRadius = n.style.borderRadius === '16px' ? '0px' : '16px';
+                  })
+                }
+                className="min-h-[36px] shrink-0 rounded-lg px-2.5 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Redondear
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  mutateSelectedDomNode((n) => {
+                    n.style.transform = n.style.transform === 'scaleX(-1)' ? 'none' : 'scaleX(-1)';
+                  })
+                }
+                aria-label="Voltear imagen"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <FlipHorizontal className="h-4 w-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="flex shrink-0 items-center gap-1 px-2 text-xs font-semibold text-[#7C3AED]">
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Bloque Canva</span>
+              </span>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  mutateSelectedDomNode((n) => {
+                    const clone = n.cloneNode(true) as HTMLElement;
+                    n.insertAdjacentElement('afterend', clone);
+                  })
+                }
+                className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>Duplicar</span>
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              mutateSelectedDomNode((n) => n.remove());
+              selectedDomNodeRef.current = null;
+              setSelectedNodeKind(null);
+            }}
+            aria-label="Eliminar elemento seleccionado"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              selectedDomNodeRef.current = null;
+              setSelectedNodeKind(null);
+            }}
+            aria-label="Cerrar barra de elemento"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {!printViewMode && (
         <WpsWordEditingBar
           drawerOpen={drawerOpen}
@@ -1039,6 +1312,15 @@ export default function WpsEditorView({
           activeFormats={activeFormats}
           onRunCommand={runFormatCommand}
           onInsertHtml={insertHtmlAtCursor}
+          onApplyInlineStyle={applyInlineStyle}
+          onCopyStyle={handleCopyDocStyle}
+          hasCopiedStyle={Boolean(copiedDocStyle)}
+          onApplyCopiedStyle={handleApplyCopiedDocStyle}
+          pageBgColor={pageBgColor}
+          onChangePageBgColor={(color) => {
+            setEyeCareMode(false);
+            setPageBgColor(color);
+          }}
           spellCheckEnabled={spellCheckEnabled}
           onToggleSpellCheck={() => setSpellCheckEnabled((v) => !v)}
           spellErrorCount={spellErrors.length}

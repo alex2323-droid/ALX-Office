@@ -19,10 +19,13 @@ import {
   ListOrdered,
   MessageSquarePlus,
   Minus,
+  Paintbrush,
+  Sparkles,
   SpellCheck,
   Strikethrough,
   Table2,
   Trash2,
+  Type,
   Underline,
 } from 'lucide-react';
 import { WpsComment } from '../data/wpsDocuments';
@@ -31,6 +34,7 @@ import {
   escapeHtmlText,
   hideSoftKeyboard,
 } from '../lib/editorDom';
+import { CANVA_FONTS, CANVA_SOLID_BGS } from './CanvaControls';
 
 export type ToolDrawerTab = 'inicio' | 'insertar' | 'ver' | 'revisar';
 
@@ -47,10 +51,11 @@ export const WORD_TEXT_COLORS = [
   { label: 'Negro', value: '#0f172a' },
   { label: 'Gris', value: '#475569' },
   { label: 'Rojo WPS', value: '#dc2626' },
+  { label: 'Naranja', value: '#ea580c' },
   { label: 'Azul', value: '#2563eb' },
+  { label: 'Morado', value: '#7c3aed' },
   { label: 'Verde', value: '#16a34a' },
   { label: 'Ámbar', value: '#d97706' },
-  { label: 'Morado', value: '#7c3aed' },
 ];
 
 export const WORD_HIGHLIGHT_COLORS = [
@@ -59,6 +64,7 @@ export const WORD_HIGHLIGHT_COLORS = [
   { label: 'Verde suave', value: '#bbf7d0' },
   { label: 'Azul suave', value: '#bfdbfe' },
   { label: 'Rosa suave', value: '#fecdd3' },
+  { label: 'Lavanda', value: '#ede9fe' },
 ];
 
 interface WpsWordEditingBarProps {
@@ -70,6 +76,12 @@ interface WpsWordEditingBarProps {
   onRunCommand: (command: string, value?: string) => void;
   onInsertHtml: (html: string) => void;
   onInsertImageDataUrl?: (dataUrl: string, fileName: string) => void;
+  onApplyInlineStyle?: (styles: Record<string, string>) => void;
+  onCopyStyle?: () => void;
+  hasCopiedStyle?: boolean;
+  onApplyCopiedStyle?: () => void;
+  pageBgColor?: string;
+  onChangePageBgColor?: (color: string) => void;
   extraInsertSection?: React.ReactNode;
   viewTabContent: React.ReactNode;
   spellCheckEnabled: boolean;
@@ -93,6 +105,12 @@ export default function WpsWordEditingBar({
   onRunCommand,
   onInsertHtml,
   onInsertImageDataUrl,
+  onApplyInlineStyle,
+  onCopyStyle,
+  hasCopiedStyle = false,
+  onApplyCopiedStyle,
+  pageBgColor,
+  onChangePageBgColor,
   extraInsertSection,
   viewTabContent,
   spellCheckEnabled,
@@ -112,6 +130,8 @@ export default function WpsWordEditingBar({
   const [linkUrl, setLinkUrl] = useState('');
   const [linkLabel, setLinkLabel] = useState('');
   const [newCommentText, setNewCommentText] = useState('');
+  const [customTextColor, setCustomTextColor] = useState('#7c3aed');
+  const [customBgColor, setCustomBgColor] = useState('#fef08a');
 
   const handleInsertTable = () => {
     const headerCells = Array.from({ length: tableCols })
@@ -351,13 +371,136 @@ export default function WpsWordEditingBar({
                     </button>
                   </div>
 
+                  {/* Canva Font Family & Size Presets */}
+                  <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        <Type className="h-3.5 w-3.5" />
+                        <span>Tipografía y tamaño Canva</span>
+                      </span>
+                      {onCopyStyle && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() =>
+                            hasCopiedStyle && onApplyCopiedStyle
+                              ? onApplyCopiedStyle()
+                              : onCopyStyle()
+                          }
+                          className={`inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                            hasCopiedStyle
+                              ? 'border-[#7C3AED] bg-violet-50 text-[#7C3AED] dark:bg-violet-950/60 dark:text-violet-300'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <Paintbrush className="h-3.5 w-3.5" />
+                          <span>{hasCopiedStyle ? 'Pegar estilo' : 'Copiar estilo'}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {CANVA_FONTS.map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (onApplyInlineStyle) {
+                              onApplyInlineStyle({ fontFamily: f.cssFamily });
+                            } else {
+                              onRunCommand('fontName', f.exportName);
+                            }
+                          }}
+                          style={{ fontFamily: f.cssFamily }}
+                          className="min-h-[40px] shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:border-[#7C3AED] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      {[12, 14, 16, 20, 26, 34, 42].map((px) => (
+                        <button
+                          key={px}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (onApplyInlineStyle) {
+                              onApplyInlineStyle({ fontSize: `${px}px` });
+                            } else {
+                              onRunCommand('fontSize', px >= 30 ? '6' : px >= 22 ? '5' : px >= 17 ? '4' : '3');
+                            }
+                          }}
+                          className="min-h-[36px] rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs font-medium tabular-nums text-slate-700 hover:border-[#7C3AED] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          {px}
+                        </button>
+                      ))}
+
+                      {onApplyInlineStyle && (
+                        <>
+                          <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
+                          {(
+                            [
+                              { label: 'AA', value: 'uppercase', title: 'Todo en mayúsculas' },
+                              { label: 'aa', value: 'lowercase', title: 'Todo en minúsculas' },
+                              { label: 'Aa', value: 'capitalize', title: 'Capitalizar' },
+                              { label: 'Normal', value: 'none', title: 'Sin transformación' },
+                            ] as const
+                          ).map((t) => (
+                            <button
+                              key={t.value}
+                              type="button"
+                              title={t.title}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => onApplyInlineStyle({ textTransform: t.value })}
+                              className="min-h-[36px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:border-[#7C3AED] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+
+                    {onApplyInlineStyle && (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                        <span className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                          <Sparkles className="h-3.5 w-3.5 text-[#7C3AED]" />
+                          <span>Efectos:</span>
+                        </span>
+                        {(
+                          [
+                            { label: 'Ninguno', styles: { textShadow: 'none', WebkitTextStroke: '0px', backgroundColor: '' } },
+                            { label: 'Sombra', styles: { textShadow: '2px 2px 0px rgba(124,58,237,0.45)' } },
+                            { label: 'Elevación', styles: { textShadow: '0 4px 12px rgba(15,23,42,0.38)' } },
+                            { label: 'Espaciado +', styles: { letterSpacing: '0.1em' } },
+                            { label: 'Compacto', styles: { letterSpacing: '0em' } },
+                          ] as { label: string; styles: Record<string, string> }[]
+                        ).map((fx) => (
+                          <button
+                            key={fx.label}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => onApplyInlineStyle(fx.styles)}
+                            className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-700 hover:border-[#7C3AED] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          >
+                            {fx.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Text & Highlight Colors */}
                   <div className="grid grid-cols-1 gap-4 border-t border-slate-100 pt-3 sm:grid-cols-2 dark:border-slate-800">
                     <div>
                       <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
                         Color de fuente
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {WORD_TEXT_COLORS.map((c) => (
                           <button
                             key={c.value}
@@ -369,6 +512,21 @@ export default function WpsWordEditingBar({
                             className="h-9 w-9 rounded-full border border-slate-300 transition-transform active:scale-95 dark:border-slate-600"
                           />
                         ))}
+                        <label
+                          title="Color personalizado"
+                          className="relative flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-gradient-to-tr from-rose-500 via-amber-400 to-indigo-500 text-xs font-bold text-white dark:border-slate-600"
+                        >
+                          <span>+</span>
+                          <input
+                            type="color"
+                            value={customTextColor}
+                            onChange={(e) => {
+                              setCustomTextColor(e.target.value);
+                              onRunCommand('foreColor', e.target.value);
+                            }}
+                            className="absolute inset-0 cursor-pointer opacity-0"
+                          />
+                        </label>
                       </div>
                     </div>
 
@@ -377,7 +535,7 @@ export default function WpsWordEditingBar({
                         <Highlighter className="h-3.5 w-3.5" />
                         <span>Resaltado</span>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {WORD_HIGHLIGHT_COLORS.map((c) => (
                           <button
                             key={c.value}
@@ -391,9 +549,50 @@ export default function WpsWordEditingBar({
                             {c.value === 'transparent' ? '×' : ''}
                           </button>
                         ))}
+                        <label
+                          title="Resaltado personalizado"
+                          className="relative flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-gradient-to-tr from-yellow-300 via-emerald-300 to-sky-400 text-xs font-bold text-slate-900 dark:border-slate-600"
+                        >
+                          <span>+</span>
+                          <input
+                            type="color"
+                            value={customBgColor}
+                            onChange={(e) => {
+                              setCustomBgColor(e.target.value);
+                              onRunCommand('hiliteColor', e.target.value);
+                            }}
+                            className="absolute inset-0 cursor-pointer opacity-0"
+                          />
+                        </label>
                       </div>
                     </div>
                   </div>
+
+                  {onChangePageBgColor && (
+                    <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+                      <div className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        Fondo de página Canva
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {CANVA_SOLID_BGS.slice(0, 7).map((bg) => (
+                          <button
+                            key={bg.value}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => onChangePageBgColor(bg.value)}
+                            title={bg.label}
+                            aria-label={`Fondo ${bg.label}`}
+                            style={{ backgroundColor: bg.value }}
+                            className={`h-8 w-8 rounded-lg border transition-transform active:scale-95 ${
+                              pageBgColor?.toLowerCase() === bg.value.toLowerCase()
+                                ? 'border-[#7C3AED] ring-2 ring-[#7C3AED]/30'
+                                : 'border-slate-300 dark:border-slate-600'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -530,6 +729,71 @@ export default function WpsWordEditingBar({
                     >
                       <span>Fecha actual</span>
                     </button>
+                  </div>
+
+                  {/* Canva Docs Design Blocks */}
+                  <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+                    <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <Sparkles className="h-3.5 w-3.5 text-[#7C3AED]" />
+                      <span>Bloques Canva Docs</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          onInsertHtml(
+                            `<div class="alx-canva-callout"><strong>Idea destacada:</strong> Resume aquí el punto clave, alerta o conclusión visual del documento.</div><p><br/></p>`,
+                          );
+                          onDrawerOpenChange(false);
+                        }}
+                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/70 px-3 text-xs font-medium text-blue-900 hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200"
+                      >
+                        <span>Tarjeta Callout</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          onInsertHtml(
+                            `<div class="alx-canva-cols"><div class="alx-canva-col"><p><strong>Columna 1</strong></p><p>Describe la primera idea o beneficio.</p></div><div class="alx-canva-col"><p><strong>Columna 2</strong></p><p>Describe la segunda idea o comparativa.</p></div></div><p><br/></p>`,
+                          );
+                          onDrawerOpenChange(false);
+                        }}
+                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        <span>2 Columnas</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          onInsertHtml(
+                            `<div class="alx-canva-kpi"><p><strong>+48%</strong> Crecimiento mensual · <span>Meta Q4 superada</span></p></div><p><br/></p>`,
+                          );
+                          onDrawerOpenChange(false);
+                        }}
+                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50/70 px-3 text-xs font-medium text-orange-900 hover:bg-orange-100 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-200"
+                      >
+                        <span>Tarjeta KPI</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          onInsertHtml(
+                            `<span style="display:inline-block;background:#7C3AED;color:#FFFFFF;padding:2px 10px;border-radius:8px;font-weight:700;font-size:0.8em;letter-spacing:0.04em;">DESTACADO</span>&nbsp;`,
+                          );
+                          onDrawerOpenChange(false);
+                        }}
+                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50/70 px-3 text-xs font-medium text-violet-900 hover:bg-violet-100 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200"
+                      >
+                        <span>Insignia</span>
+                      </button>
+                    </div>
                   </div>
 
                   {extraInsertSection}
@@ -758,6 +1022,27 @@ export default function WpsWordEditingBar({
           >
             <CheckSquare className="h-4 w-4" />
           </button>
+
+          {onCopyStyle && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() =>
+                hasCopiedStyle && onApplyCopiedStyle
+                  ? onApplyCopiedStyle()
+                  : onCopyStyle()
+              }
+              aria-label={hasCopiedStyle ? 'Pegar estilo' : 'Copiar estilo'}
+              title={hasCopiedStyle ? 'Pegar estilo copiado' : 'Copiar estilo del texto'}
+              className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition-colors ${
+                hasCopiedStyle
+                  ? 'bg-violet-50 text-[#7C3AED] dark:bg-violet-950/50 dark:text-violet-300'
+                  : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Paintbrush className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         <button

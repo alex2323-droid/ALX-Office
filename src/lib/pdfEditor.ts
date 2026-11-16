@@ -10,7 +10,12 @@ export interface PdfTextAnnotation {
   fontSize: number;
   color: string;
   bold?: boolean;
+  italic?: boolean;
+  fontFamily?: 'sans' | 'serif' | 'mono';
+  opacity?: number;
+  rotationDeg?: number;
   bgFill?: string;
+  zIndex?: number;
 }
 
 export interface PdfDrawAnnotation {
@@ -20,23 +25,45 @@ export interface PdfDrawAnnotation {
   points: { xPct: number; yPct: number }[];
   color: string;
   strokeWidth: number;
+  opacity?: number;
+  zIndex?: number;
 }
 
 export interface PdfRectAnnotation {
   id: string;
-  kind: 'highlight' | 'redact' | 'box';
+  kind: 'highlight' | 'redact' | 'box' | 'circle' | 'arrow' | 'line';
   pageNumber: number;
   xPct: number;
   yPct: number;
   wPct: number;
   hPct: number;
   color: string;
+  fillColor?: string;
+  strokeWidth?: number;
+  opacity?: number;
+  rotationDeg?: number;
+  zIndex?: number;
+}
+
+export interface PdfImageAnnotation {
+  id: string;
+  kind: 'image';
+  pageNumber: number;
+  xPct: number;
+  yPct: number;
+  wPct: number;
+  hPct: number;
+  src: string;
+  opacity?: number;
+  rotationDeg?: number;
+  zIndex?: number;
 }
 
 export type PdfAnnotation =
   | PdfTextAnnotation
   | PdfDrawAnnotation
-  | PdfRectAnnotation;
+  | PdfRectAnnotation
+  | PdfImageAnnotation;
 
 function parseHexRgb(hex: string) {
   const clean = hex.replace('#', '').trim();
@@ -164,16 +191,32 @@ export async function applyPdfEdits(
   if (annotations.length === 0) return pdfBytes;
 
   const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontHelvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontHelveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontHelveticaOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+  const fontHelveticaBoldOblique = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
+  const fontTimes = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+  const fontTimesBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  const fontCourier = await pdfDoc.embedFont(StandardFonts.Courier);
+  const fontCourierBold = await pdfDoc.embedFont(StandardFonts.CourierBold);
   const pages = pdfDoc.getPages();
 
-  for (const ann of annotations) {
+  const sortedAnns = [...annotations].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+
+  for (const ann of sortedAnns) {
     const page = pages[ann.pageNumber - 1];
     if (!page) continue;
     const geom = getPageGeometry(page);
+    const opacity = ann.opacity !== undefined ? Math.max(0.05, Math.min(1, ann.opacity)) : 1;
 
-    if (ann.kind === 'highlight' || ann.kind === 'redact' || ann.kind === 'box') {
+    if (
+      ann.kind === 'highlight' ||
+      ann.kind === 'redact' ||
+      ann.kind === 'box' ||
+      ann.kind === 'circle' ||
+      ann.kind === 'arrow' ||
+      ann.kind === 'line'
+    ) {
       const bounds = visualRectToPdfBounds(
         geom,
         ann.xPct,
@@ -181,7 +224,7 @@ export async function applyPdfEdits(
         ann.wPct,
         ann.hPct,
       );
-      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      if (bounds.width <= 0 && bounds.height <= 0) continue;
 
       if (ann.kind === 'highlight') {
         page.drawRectangle({
@@ -190,7 +233,7 @@ export async function applyPdfEdits(
           width: bounds.width,
           height: bounds.height,
           color: parseHexRgb(ann.color),
-          opacity: 0.34,
+          opacity: Math.min(0.95, 0.34 * opacity),
         });
       } else if (ann.kind === 'redact') {
         page.drawRectangle({
@@ -199,8 +242,58 @@ export async function applyPdfEdits(
           width: bounds.width,
           height: bounds.height,
           color: parseHexRgb(ann.color || '#FFFFFF'),
-          opacity: 1,
+          opacity,
         });
+      } else if (ann.kind === 'circle') {
+        page.drawEllipse({
+          x: bounds.x + bounds.width / 2,
+          y: bounds.y + bounds.height / 2,
+          xScale: Math.max(2, bounds.width / 2),
+          yScale: Math.max(2, bounds.height / 2),
+          borderColor: parseHexRgb(ann.color),
+          borderWidth: ann.strokeWidth ?? 1.8,
+          ...(ann.fillColor && ann.fillColor !== 'transparent'
+            ? { color: parseHexRgb(ann.fillColor) }
+            : {}),
+          opacity,
+          borderOpacity: opacity,
+        });
+      } else if (ann.kind === 'line' || ann.kind === 'arrow') {
+        const startPt = visualPctToPdfPoint(geom, ann.xPct, ann.yPct + ann.hPct / 2);
+        const endPt = visualPctToPdfPoint(geom, ann.xPct + ann.wPct, ann.yPct + ann.hPct / 2);
+        const thickness = ann.strokeWidth ?? 2;
+        const lineColor = parseHexRgb(ann.color);
+        page.drawLine({
+          start: startPt,
+          end: endPt,
+          thickness,
+          color: lineColor,
+          opacity,
+        });
+        if (ann.kind === 'arrow') {
+          const angle = Math.atan2(endPt.y - startPt.y, endPt.x - startPt.x);
+          const headLen = Math.max(8, thickness * 4);
+          page.drawLine({
+            start: endPt,
+            end: {
+              x: endPt.x - headLen * Math.cos(angle - Math.PI / 6),
+              y: endPt.y - headLen * Math.sin(angle - Math.PI / 6),
+            },
+            thickness,
+            color: lineColor,
+            opacity,
+          });
+          page.drawLine({
+            start: endPt,
+            end: {
+              x: endPt.x - headLen * Math.cos(angle + Math.PI / 6),
+              y: endPt.y - headLen * Math.sin(angle + Math.PI / 6),
+            },
+            thickness,
+            color: lineColor,
+            opacity,
+          });
+        }
       } else {
         page.drawRectangle({
           x: bounds.x,
@@ -208,8 +301,41 @@ export async function applyPdfEdits(
           width: bounds.width,
           height: bounds.height,
           borderColor: parseHexRgb(ann.color),
-          borderWidth: 1.75,
+          borderWidth: ann.strokeWidth ?? 1.75,
+          ...(ann.fillColor && ann.fillColor !== 'transparent'
+            ? { color: parseHexRgb(ann.fillColor) }
+            : {}),
+          opacity,
+          borderOpacity: opacity,
         });
+      }
+    } else if (ann.kind === 'image') {
+      try {
+        const bounds = visualRectToPdfBounds(
+          geom,
+          ann.xPct,
+          ann.yPct,
+          ann.wPct,
+          ann.hPct,
+        );
+        if (bounds.width <= 0 || bounds.height <= 0) continue;
+        const dataIdx = ann.src.indexOf(',');
+        const base64Body = dataIdx >= 0 ? ann.src.slice(dataIdx + 1) : ann.src;
+        const bin = atob(base64Body);
+        const imgBytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) imgBytes[i] = bin.charCodeAt(i);
+        const embedded = /image\/png/i.test(ann.src)
+          ? await pdfDoc.embedPng(imgBytes)
+          : await pdfDoc.embedJpg(imgBytes);
+        page.drawImage(embedded, {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          opacity,
+        });
+      } catch {
+        // Ignore invalid/corrupt image embeds cleanly
       }
     } else if (ann.kind === 'draw') {
       if (ann.points.length < 2) continue;
@@ -231,13 +357,28 @@ export async function applyPdfEdits(
           end,
           thickness,
           color,
-          opacity: 0.95,
+          opacity: 0.95 * opacity,
         });
       }
     } else if (ann.kind === 'text') {
       const clean = sanitizeWinAnsi(ann.text);
       const lines = clean.split(/\r?\n/);
-      const font = ann.bold ? fontBold : fontRegular;
+      const font =
+        ann.fontFamily === 'serif'
+          ? ann.bold
+            ? fontTimesBold
+            : fontTimes
+          : ann.fontFamily === 'mono'
+            ? ann.bold
+              ? fontCourierBold
+              : fontCourier
+            : ann.bold && ann.italic
+              ? fontHelveticaBoldOblique
+              : ann.italic
+                ? fontHelveticaOblique
+                : ann.bold
+                  ? fontHelveticaBold
+                  : fontHelvetica;
       const size = Math.max(8, Math.min(72, ann.fontSize || 14));
       const lineHeight = size * 1.25;
       const color = parseHexRgb(ann.color);
@@ -271,7 +412,7 @@ export async function applyPdfEdits(
             width: bgBounds.width,
             height: bgBounds.height,
             color: parseHexRgb(ann.bgFill),
-            opacity: 1,
+            opacity,
           });
         }
       }
@@ -289,7 +430,8 @@ export async function applyPdfEdits(
           size,
           font,
           color,
-          rotate: degrees(geom.rot),
+          opacity,
+          rotate: degrees(geom.rot - (ann.rotationDeg ?? 0)),
         });
       }
     }
