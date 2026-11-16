@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { WifiOff } from 'lucide-react';
+import AiCreateDocumentModal from './components/AiCreateDocumentModal';
 import WpsEditorView from './components/WpsEditorView';
 import WpsHomeView, { HomeTab } from './components/WpsHomeView';
 import WpsPdfViewer from './components/WpsPdfViewer';
@@ -103,6 +104,8 @@ export default function App() {
     null,
   );
   const [isUploadingDrive, setIsUploadingDrive] = useState(false);
+  const [aiCreateOpen, setAiCreateOpen] = useState(false);
+  const [aiCreateFormat, setAiCreateFormat] = useState<'DOCX' | 'PPTX' | 'PDF'>('DOCX');
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -336,6 +339,15 @@ export default function App() {
     scheduleCloudUpsert(created, true);
   };
 
+  const handleCreateAiDocument = (created: WpsDocument) => {
+    docsDirtyRef.current = true;
+    const nextDocs = [created, ...documentsRef.current];
+    documentsRef.current = nextDocs;
+    setDocuments(nextDocs);
+    setActiveDocId(created.id);
+    scheduleCloudUpsert(created, true);
+  };
+
   const handleUpdateDocument = (docId: string, patch: Partial<WpsDocument>) => {
     docsDirtyRef.current = true;
     setSyncStatus('saving');
@@ -473,6 +485,77 @@ export default function App() {
       });
     }
   };
+
+  const handleImportFileRef = useRef(handleImportFile);
+  handleImportFileRef.current = handleImportFile;
+
+  useEffect(() => {
+    const consumeNativePendingFile = () => {
+      try {
+        const bridge = (
+          window as unknown as {
+            AlxNativeBridge?: { consumePendingFile?: () => string | null };
+          }
+        ).AlxNativeBridge;
+        const rawJson = bridge?.consumePendingFile?.();
+        if (!rawJson) return;
+        const parsed = JSON.parse(rawJson) as {
+          name?: string;
+          mimeType?: string;
+          base64?: string;
+        };
+        if (!parsed.base64) return;
+        const bin = atob(parsed.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) {
+          bytes[i] = bin.charCodeAt(i);
+        }
+        const fileName = parsed.name || 'documento.pdf';
+        const file = new File([bytes], fileName, {
+          type: parsed.mimeType || 'application/octet-stream',
+        });
+        void handleImportFileRef.current(file);
+      } catch {
+        // Ignore malformed native bridge payload
+      }
+    };
+
+    consumeNativePendingFile();
+    window.addEventListener('alx-native-file', consumeNativePendingFile);
+    window.addEventListener('focus', consumeNativePendingFile);
+
+    const winWithLaunch = window as unknown as {
+      launchQueue?: {
+        setConsumer?: (
+          consumer: (launchParams: {
+            files?: Array<{ getFile: () => Promise<File> }>;
+          }) => void,
+        ) => void;
+      };
+    };
+
+    if (typeof winWithLaunch.launchQueue?.setConsumer === 'function') {
+      winWithLaunch.launchQueue.setConsumer((launchParams) => {
+        const files = launchParams?.files;
+        if (!files || files.length === 0) return;
+        void (async () => {
+          for (const handle of files) {
+            try {
+              const file = await handle.getFile();
+              await handleImportFileRef.current(file);
+            } catch {
+              // Ignore unreadable file handle
+            }
+          }
+        })();
+      });
+    }
+
+    return () => {
+      window.removeEventListener('alx-native-file', consumeNativePendingFile);
+      window.removeEventListener('focus', consumeNativePendingFile);
+    };
+  }, []);
 
   const handleGoogleLogin = async () => {
     if (!isOnline) {
@@ -760,6 +843,18 @@ export default function App() {
         onGoogleLogout={handleGoogleLogout}
         onOpenGooglePicker={handleOpenGooglePicker}
         onRequestSaveToDrive={(doc) => setPendingDriveUploadDoc(doc)}
+        onOpenAiCreator={(format) => {
+          setAiCreateFormat(format || 'DOCX');
+          setAiCreateOpen(true);
+        }}
+      />
+
+      <AiCreateDocumentModal
+        key={aiCreateFormat}
+        open={aiCreateOpen}
+        initialFormat={aiCreateFormat}
+        onClose={() => setAiCreateOpen(false)}
+        onCreateDocument={handleCreateAiDocument}
       />
     </>
   );

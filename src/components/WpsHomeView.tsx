@@ -13,7 +13,9 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  Presentation,
   Search,
+  Sparkles,
   Star,
   Sun,
   Trash2,
@@ -86,6 +88,7 @@ interface WpsHomeViewProps {
   onGoogleLogout: () => void;
   onOpenGooglePicker: () => void;
   onRequestSaveToDrive: (doc: WpsDocument) => void;
+  onOpenAiCreator?: (format?: 'DOCX' | 'PPTX' | 'PDF') => void;
 }
 
 function GoogleSignInButton({
@@ -157,6 +160,7 @@ export default function WpsHomeView({
   onGoogleLogout,
   onOpenGooglePicker,
   onRequestSaveToDrive,
+  onOpenAiCreator,
 }: WpsHomeViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -229,7 +233,7 @@ export default function WpsHomeView({
             </span>
           </div>
 
-          <div className="p-4">
+          <div className="space-y-2 p-4">
             <button
               type="button"
               onClick={() => onCreateFromTemplate(WPS_TEMPLATES[0])}
@@ -238,6 +242,16 @@ export default function WpsHomeView({
               <Plus className="h-4 w-4" />
               <span>Nuevo documento</span>
             </button>
+            {onOpenAiCreator && (
+              <button
+                type="button"
+                onClick={() => onOpenAiCreator('DOCX')}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 text-sm font-semibold text-white shadow-xs transition-opacity hover:opacity-95 active:scale-[0.98]"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>Crear con IA</span>
+              </button>
+            )}
           </div>
 
           <nav className="flex-1 space-y-1 px-4" aria-label="Navegación principal">
@@ -369,14 +383,26 @@ export default function WpsHomeView({
                   ? 'Documentos destacados'
                   : 'Plantillas de ALX Writer'}
             </h1>
-            <button
-              type="button"
-              onClick={() => onCreateFromTemplate(WPS_TEMPLATES[0])}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#EA3D2F] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#D63124] whitespace-nowrap shrink-0"
-            >
-              <FilePlus2 className="h-4 w-4" />
-              <span>Crear documento</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {onOpenAiCreator && (
+                <button
+                  type="button"
+                  onClick={() => onOpenAiCreator('DOCX')}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-4 text-xs font-semibold text-white shadow-xs transition-opacity hover:opacity-95 whitespace-nowrap shrink-0"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span>Crear con IA</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onCreateFromTemplate(WPS_TEMPLATES[0])}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#EA3D2F] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#D63124] whitespace-nowrap shrink-0"
+              >
+                <FilePlus2 className="h-4 w-4" />
+                <span>Crear documento</span>
+              </button>
+            </div>
           </header>
 
           {/* Main Scrollable Viewport */}
@@ -540,42 +566,112 @@ export default function WpsHomeView({
               </section>
             ) : (
               <>
-                {/* Quick Templates Carousel (Recents View) */}
+                {/* AI Quick Creation + Quick Templates (Recents View) */}
                 {activeTab === 'recents' && !searchQuery && (
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                        Crear rápido
-                      </h2>
-                      <button
-                        type="button"
-                        onClick={() => onTabChange('templates')}
-                        className="min-h-[44px] px-2 text-xs font-medium text-[#EA3D2F] hover:underline dark:text-red-400"
-                      >
-                        Ver plantillas
-                      </button>
-                    </div>
-                    <div className="flex gap-3 overflow-x-auto pb-1">
-                      {WPS_TEMPLATES.map((tpl) => (
-                        <button
-                          key={tpl.id}
-                          type="button"
-                          onClick={() => onCreateFromTemplate(tpl)}
-                          className="flex w-40 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition-colors hover:border-[#EA3D2F]/50 active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900"
-                        >
-                          <TemplatePageThumbnail template={tpl} size="sm" />
-                          <div className="w-full p-3">
-                            <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
-                              {tpl.title}
+                  <>
+                    {onOpenAiCreator && (
+                      <section className="rounded-2xl border border-violet-200/80 bg-white p-4 dark:border-violet-900/40 dark:bg-slate-900">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 text-white">
+                              <Sparkles className="h-3.5 w-3.5" />
                             </div>
-                            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                              {tpl.category}
-                            </div>
+                            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              Crear documentos completos con IA
+                            </h2>
                           </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <button
+                            type="button"
+                            onClick={() => onOpenAiCreator('DOCX')}
+                            className="flex min-h-[48px] items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-left transition-colors hover:border-violet-400 hover:bg-violet-50/60 active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950 dark:hover:border-violet-600"
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                              <FileText className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                Word (.docx) con IA
+                              </div>
+                              <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                                Redacción, tablas y diseño
+                              </div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onOpenAiCreator('PPTX')}
+                            className="flex min-h-[48px] items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-left transition-colors hover:border-violet-400 hover:bg-violet-50/60 active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950 dark:hover:border-violet-600"
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600 dark:bg-orange-950/60 dark:text-orange-400">
+                              <Presentation className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                Presentación (.pptx) IA
+                              </div>
+                              <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                                Diapositivas Canva + gráficos
+                              </div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onOpenAiCreator('PDF')}
+                            className="flex min-h-[48px] items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-left transition-colors hover:border-violet-400 hover:bg-violet-50/60 active:scale-[0.99] dark:border-slate-800 dark:bg-slate-950 dark:hover:border-violet-600"
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-400">
+                              <FilePlus2 className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                Documento PDF con IA
+                              </div>
+                              <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                                PDF multipágina maquetado
+                              </div>
+                            </div>
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                          Crear rápido
+                        </h2>
+                        <button
+                          type="button"
+                          onClick={() => onTabChange('templates')}
+                          className="min-h-[44px] px-2 text-xs font-medium text-[#EA3D2F] hover:underline dark:text-red-400"
+                        >
+                          Ver plantillas
                         </button>
-                      ))}
-                    </div>
-                  </section>
+                      </div>
+                      <div className="flex gap-3 overflow-x-auto pb-1">
+                        {WPS_TEMPLATES.map((tpl) => (
+                          <button
+                            key={tpl.id}
+                            type="button"
+                            onClick={() => onCreateFromTemplate(tpl)}
+                            className="flex w-40 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition-colors hover:border-[#EA3D2F]/50 active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900"
+                          >
+                            <TemplatePageThumbnail template={tpl} size="sm" />
+                            <div className="w-full p-3">
+                              <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                {tpl.title}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                {tpl.category}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  </>
                 )}
 
                 {/* Document List */}

@@ -32,16 +32,64 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/assets/aistudio/1794773231252_a0df14cb.png',
-              sizes: '1649x1649',
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-maskable-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
             },
             {
               src: '/assets/aistudio/1794773231252_a0df14cb.png',
               sizes: '1649x1649',
               type: 'image/png',
-              purpose: 'maskable',
+              purpose: 'any',
+            },
+          ],
+          share_target: {
+            action: '/',
+            method: 'POST',
+            enctype: 'multipart/form-data',
+            params: {
+              title: 'title',
+              text: 'text',
+              url: 'url',
+              files: [
+                {
+                  name: 'file',
+                  accept: [
+                    'application/pdf',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/msword',
+                    'text/plain',
+                    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                    'application/vnd.ms-powerpoint',
+                  ],
+                },
+              ],
+            },
+          },
+          file_handlers: [
+            {
+              action: '/',
+              accept: {
+                'application/pdf': ['.pdf'],
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+                'application/msword': ['.doc'],
+                'text/plain': ['.txt'],
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+                'application/vnd.ms-powerpoint': ['.ppt'],
+              },
             },
           ],
         },
@@ -49,7 +97,7 @@ export default defineConfig(() => {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,mjs}'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           navigateFallback: '/index.html',
-          navigateFallbackDenylist: [/^\/privacy\.html$/, /^\/terms\.html$/],
+          navigateFallbackDenylist: [/^\/privacy\.html$/, /^\/terms\.html$/, /^\/api\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

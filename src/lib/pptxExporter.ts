@@ -15,7 +15,8 @@ function escapeXml(value: string): string {
 
 function normalizeHexColor(hex?: string, fallback = '0F172A'): string {
   if (!hex || hex === 'transparent') return fallback;
-  const clean = hex.trim().replace('#', '');
+  const trimmed = hex.trim();
+  const clean = trimmed.replace('#', '');
   if (/^[0-9a-fA-F]{6}$/.test(clean)) return clean.toUpperCase();
   if (/^[0-9a-fA-F]{3}$/.test(clean)) {
     return clean
@@ -24,7 +25,26 @@ function normalizeHexColor(hex?: string, fallback = '0F172A'): string {
       .join('')
       .toUpperCase();
   }
+  const rgbMatch = trimmed.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgbMatch) {
+    const toHex = (n: string) =>
+      Math.max(0, Math.min(255, Number(n) || 0))
+        .toString(16)
+        .padStart(2, '0')
+        .toUpperCase();
+    return `${toHex(rgbMatch[1])}${toHex(rgbMatch[2])}${toHex(rgbMatch[3])}`;
+  }
+  const embeddedHex = trimmed.match(/#([0-9a-fA-F]{6})/);
+  if (embeddedHex) return embeddedHex[1].toUpperCase();
   return fallback;
+}
+
+function isDarkNormalizedHex(hex6: string): boolean {
+  if (!/^[0-9A-F]{6}$/i.test(hex6)) return false;
+  const r = parseInt(hex6.slice(0, 2), 16);
+  const g = parseInt(hex6.slice(2, 4), 16);
+  const b = parseInt(hex6.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.48;
 }
 
 function htmlToPlainLines(html: string): string[] {
@@ -179,11 +199,22 @@ function buildSlideTableXml(
   cx: number,
   cy: number,
   headerBgHex = 'F1F5F9',
+  headerTextHex?: string,
+  cellBgHex = 'FFFFFF',
 ): string {
   const colCount = Math.max(1, headers.length);
   const colW = Math.max(100000, Math.round(cx / colCount));
   const rowCount = Math.max(1, rows.length + 1);
   const rowH = Math.max(250000, Math.round(cy / rowCount));
+
+  const resolvedHeaderBg = normalizeHexColor(headerBgHex, 'F1F5F9');
+  const resolvedHeaderText = headerTextHex
+    ? normalizeHexColor(headerTextHex, '0F172A')
+    : isDarkNormalizedHex(resolvedHeaderBg)
+      ? 'FFFFFF'
+      : '0F172A';
+  const resolvedCellBg = normalizeHexColor(cellBgHex, 'FFFFFF');
+  const resolvedCellText = isDarkNormalizedHex(resolvedCellBg) ? 'F8FAFC' : '0F172A';
 
   const gridCols = Array.from({ length: colCount })
     .map(() => `<a:gridCol w="${colW}"/>`)
@@ -200,14 +231,14 @@ function buildSlideTableXml(
             <a:p>
               <a:r>
                 <a:rPr lang="es-ES" sz="1100" b="${isHeader ? 1 : 0}">
-                  <a:solidFill><a:srgbClr val="0F172A"/></a:solidFill>
+                  <a:solidFill><a:srgbClr val="${isHeader ? resolvedHeaderText : resolvedCellText}"/></a:solidFill>
                 </a:rPr>
                 <a:t>${escapeXml(text)}</a:t>
               </a:r>
             </a:p>
           </a:txBody>
           <a:tcPr>
-            <a:solidFill><a:srgbClr val="${isHeader ? normalizeHexColor(headerBgHex, 'F1F5F9') : 'FFFFFF'}"/></a:solidFill>
+            <a:solidFill><a:srgbClr val="${isHeader ? resolvedHeaderBg : resolvedCellBg}"/></a:solidFill>
           </a:tcPr>
         </a:tc>`;
       })
@@ -363,7 +394,10 @@ export async function exportDocumentToPptxBytes(doc: WpsDocument): Promise<Uint8
     let shapeId = 2;
     const shapeNodes: string[] = [];
 
-    const bgHex = normalizeHexColor(slide.backgroundColor, 'FFFFFF');
+    const bgHex = normalizeHexColor(
+      slide.backgroundColor || slide.backgroundGradient,
+      'FFFFFF',
+    );
     const bgXml = `<p:bg><p:bgPr><a:solidFill><a:srgbClr val="${bgHex}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>`;
 
     const elements: WpsSlideElement[] =
@@ -491,6 +525,8 @@ export async function exportDocumentToPptxBytes(doc: WpsDocument): Promise<Uint8
             cx,
             cy,
             el.headerBgColor,
+            el.headerTextColor,
+            el.cellBgColor,
           ),
         );
       } else if (el.type === 'image') {
@@ -523,26 +559,28 @@ export async function exportDocumentToPptxBytes(doc: WpsDocument): Promise<Uint8
           el.title || 'Gráfico',
           ...(el.series[0]?.points.map((pt) => `${pt.label}: ${pt.value}`) || []),
         ];
+        const chartBgHex = normalizeHexColor(el.fillColor, 'F8FAFC');
         shapeNodes.push(
           buildSlideShapeXml(shapeId++, el.title || 'Gráfico', x, y, cx, cy, {
             geom: 'roundRect',
-            fillHex: el.fillColor || '#F8FAFC',
+            fillHex: chartBgHex,
             borderHex: el.borderColor || '#CBD5E1',
             paragraphsXml: buildTextParagraphsXml(summaryLines, {
               fontSizePt: 13,
-              color: '#0F172A',
+              color: isDarkNormalizedHex(chartBgHex) ? '#F8FAFC' : '#0F172A',
             }),
           }),
         );
       } else if (el.type === 'diagram') {
+        const diagBgHex = normalizeHexColor(el.fillColor, 'F8FAFC');
         shapeNodes.push(
           buildSlideShapeXml(shapeId++, 'Diagrama', x, y, cx, cy, {
             geom: 'roundRect',
-            fillHex: el.fillColor || '#F8FAFC',
+            fillHex: diagBgHex,
             borderHex: el.borderColor || '#CBD5E1',
             paragraphsXml: buildTextParagraphsXml(el.items, {
               fontSizePt: 13,
-              color: '#0F172A',
+              color: isDarkNormalizedHex(diagBgHex) ? '#F8FAFC' : '#0F172A',
             }),
           }),
         );

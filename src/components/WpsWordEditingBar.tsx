@@ -89,6 +89,7 @@ interface WpsWordEditingBarProps {
   spellErrorCount: number;
   firstSpellErrorWord?: string;
   onJumpToNextSpellError: () => void;
+  onOpenAiAssistant?: () => void;
   exportSection?: React.ReactNode;
   comments: WpsComment[];
   onAddComment: (text: string) => void;
@@ -118,6 +119,7 @@ export default function WpsWordEditingBar({
   spellErrorCount,
   firstSpellErrorWord,
   onJumpToNextSpellError,
+  onOpenAiAssistant,
   exportSection,
   comments,
   onAddComment,
@@ -1045,28 +1047,47 @@ export default function WpsWordEditingBar({
           )}
         </div>
 
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            if (!drawerOpen) {
-              hideSoftKeyboard();
-            }
-            onDrawerOpenChange(!drawerOpen);
-          }}
-          className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-            drawerOpen
-              ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-              : 'border border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-          }`}
-        >
-          <span>Herramientas</span>
-          {drawerOpen ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronUp className="h-4 w-4" />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {onOpenAiAssistant && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                hideSoftKeyboard();
+                onOpenAiAssistant();
+              }}
+              aria-label="Asistente IA de edición"
+              title="Asistente IA"
+              className="inline-flex min-h-[40px] items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-3 text-xs font-semibold text-white shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>IA</span>
+            </button>
           )}
-        </button>
+
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (!drawerOpen) {
+                hideSoftKeyboard();
+              }
+              onDrawerOpenChange(!drawerOpen);
+            }}
+            className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+              drawerOpen
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                : 'border border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+            }`}
+          >
+            <span>Herramientas</span>
+            {drawerOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUp className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </footer>
     </>
   );

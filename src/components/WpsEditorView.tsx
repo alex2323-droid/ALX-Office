@@ -45,6 +45,7 @@ import WpsWordEditingBar, {
   ToolDrawerTab,
   WordActiveFormats,
 } from './WpsWordEditingBar';
+import AiEditAssistantModal from './AiEditAssistantModal';
 
 interface WpsEditorViewProps {
   document: WpsDocument;
@@ -128,6 +129,22 @@ export default function WpsEditorView({
     { id: string; left: number; top: number; width: number }[]
   >([]);
   const [spellMenu, setSpellMenu] = useState<SpellContextMenuState | null>(null);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiSelectionSnapshot, setAiSelectionSnapshot] = useState<{
+    selectedText: string;
+    fullText: string;
+    currentHtml: string;
+    detectedColors: string[];
+    detectedHeadings: string[];
+    hasTables: boolean;
+  }>({
+    selectedText: '',
+    fullText: '',
+    currentHtml: '',
+    detectedColors: [],
+    detectedHeadings: [],
+    hasTables: false,
+  });
 
   const stats = useMemo(() => computeDocStats(doc.contentHtml), [doc.contentHtml]);
 
@@ -187,6 +204,13 @@ export default function WpsEditorView({
     setSelectedNodeKind(null);
     selectedDomNodeRef.current = null;
     savedRangeRef.current = null;
+    const bgMatch = doc.contentHtml.match(/data-ai-page-bg="([^"]+)"/i);
+    if (bgMatch?.[1]) {
+      setEyeCareMode(false);
+      setPageBgColor(bgMatch[1]);
+    } else {
+      setPageBgColor('#FFFFFF');
+    }
     lastAppliedHtmlRef.current = doc.contentHtml;
     if (editorRef.current && editorRef.current.innerHTML !== doc.contentHtml) {
       editorRef.current.innerHTML = doc.contentHtml;
@@ -380,6 +404,95 @@ export default function WpsEditorView({
       runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
         if (isBlockInsertion) {
           prepareSelectionForBlockInsert(el, savedRangeRef.current);
+        }
+        window.document.execCommand('insertHTML', false, html);
+      });
+      persistEditorHtml(true);
+      syncFormatState();
+    });
+  };
+
+  const handleOpenAiAssistant = () => {
+    const el = editorRef.current;
+    let selectedText = '';
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && el && el.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0);
+      if (isRangeInsideElement(range, el)) {
+        savedRangeRef.current = range.cloneRange();
+        selectedText = sel.toString().trim();
+      }
+    } else if (savedRangeRef.current && el && isRangeInsideElement(savedRangeRef.current, el)) {
+      selectedText = savedRangeRef.current.toString().trim();
+    }
+    const fullText = el?.innerText?.trim() || '';
+    const currentHtml = el?.innerHTML || doc.contentHtml || '';
+    const colorMatches =
+      currentHtml.match(/#[0-9a-fA-F]{3,8}\b|rgb\([^)]+\)/g) || [];
+    const detectedColors = Array.from(new Set(colorMatches)).slice(0, 8);
+    const detectedHeadings = el
+      ? Array.from(el.querySelectorAll('h1, h2, h3'))
+          .map((h) => (h.textContent || '').trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    const hasTables = Boolean(el?.querySelector('table'));
+
+    setAiSelectionSnapshot({
+      selectedText,
+      fullText,
+      currentHtml,
+      detectedColors,
+      detectedHeadings,
+      hasTables,
+    });
+    hideSoftKeyboard();
+    setDrawerOpen(false);
+    setSpellMenu(null);
+    setAiModalOpen(true);
+  };
+
+  const handleApplyAiDocumentResult = (
+    html: string,
+    placement: 'replace-selection' | 'insert' | 'replace-all',
+    designPatch?: {
+      pageBgColor?: string;
+      fontFamily?: 'sans' | 'serif' | 'mono';
+    },
+  ) => {
+    const el = editorRef.current;
+    if (!el) return;
+    if (!isEditing) setIsEditing(true);
+
+    if (designPatch?.pageBgColor) {
+      setEyeCareMode(false);
+      setPageBgColor(designPatch.pageBgColor);
+    }
+    if (designPatch?.fontFamily) {
+      setFontFamily(designPatch.fontFamily);
+    }
+
+    if (placement === 'replace-all') {
+      window.requestAnimationFrame(() => {
+        el.innerHTML = html;
+        savedRangeRef.current = null;
+        persistEditorHtml(true);
+        syncFormatState();
+      });
+      return;
+    }
+
+    const isBlockInsertion = /<(table|hr|p|h[1-3]|ul|ol|blockquote|div)\b/i.test(html);
+    window.requestAnimationFrame(() => {
+      runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+        if (placement === 'insert' && isBlockInsertion) {
+          prepareSelectionForBlockInsert(el, savedRangeRef.current);
+        } else if (placement === 'replace-selection' && savedRangeRef.current) {
+          const sel = window.getSelection();
+          if (sel && isRangeInsideElement(savedRangeRef.current, el)) {
+            sel.removeAllRanges();
+            sel.addRange(savedRangeRef.current);
+          }
         }
         window.document.execCommand('insertHTML', false, html);
       });
@@ -985,6 +1098,18 @@ export default function WpsEditorView({
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
+              onClick={handleOpenAiAssistant}
+              aria-label="Asistente IA de edición"
+              title="Asistente IA"
+              className="inline-flex min-h-[40px] items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 text-xs font-semibold text-white shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>IA</span>
+            </button>
+
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (isEditing) {
                   persistEditorHtml(true);
@@ -1326,6 +1451,7 @@ export default function WpsEditorView({
           spellErrorCount={spellErrors.length}
           firstSpellErrorWord={spellErrors[0]?.word}
           onJumpToNextSpellError={handleJumpToNextSpellError}
+          onOpenAiAssistant={handleOpenAiAssistant}
           comments={doc.comments}
           onAddComment={handleAddComment}
           onToggleCommentResolved={toggleCommentResolved}
@@ -1484,6 +1610,27 @@ export default function WpsEditorView({
           }
         />
       )}
+
+      <AiEditAssistantModal
+        open={aiModalOpen}
+        mode="document"
+        documentTitle={doc.title}
+        fileType={doc.format}
+        selectedText={aiSelectionSnapshot.selectedText}
+        fullText={aiSelectionSnapshot.fullText}
+        currentHtml={aiSelectionSnapshot.currentHtml}
+        pageBgColor={pageBgColor}
+        fontFamily={fontFamily}
+        designContext={{
+          pageBgColor,
+          fontFamily,
+          detectedColors: aiSelectionSnapshot.detectedColors,
+          detectedHeadings: aiSelectionSnapshot.detectedHeadings,
+          hasTables: aiSelectionSnapshot.hasTables,
+        }}
+        onClose={() => setAiModalOpen(false)}
+        onApplyDocumentResult={handleApplyAiDocumentResult}
+      />
     </div>
   );
 }

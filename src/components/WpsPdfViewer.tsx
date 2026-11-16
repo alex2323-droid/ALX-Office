@@ -33,6 +33,7 @@ import {
   RotateCw,
   Save,
   Search,
+  Sparkles,
   SpellCheck,
   Square,
   Trash2,
@@ -81,6 +82,7 @@ import WpsWordEditingBar, {
 } from './WpsWordEditingBar';
 import { CANVA_COLORS, CanvaColorSwatchRow } from './CanvaControls';
 import { base64ToUint8, uint8ToBase64 } from '../lib/wpsFileParser';
+import AiEditAssistantModal from './AiEditAssistantModal';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -1327,6 +1329,13 @@ export default function WpsPdfViewer({
   const [editNotice, setEditNotice] = useState<string | null>(null);
   const pdfImageInputRef = useRef<HTMLInputElement | null>(null);
   const [copiedDocStyle, setCopiedDocStyle] = useState<Record<string, string> | null>(null);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiSnapshot, setAiSnapshot] = useState<{
+    selectedText: string;
+    fullText: string;
+    currentHtml: string;
+    pageNumber: number;
+  }>({ selectedText: '', fullText: '', currentHtml: '', pageNumber: 1 });
 
   const [viewportWidth, setViewportWidth] = useState(
     typeof window !== 'undefined' ? window.innerWidth : 1024,
@@ -1712,6 +1721,120 @@ export default function WpsPdfViewer({
 
   const insertHtmlAtCursor = (html: string) => {
     runWordCommand('insertHTML', html);
+  };
+
+  const handleOpenAiAssistant = () => {
+    const targetPage =
+      editMode && editSubMode === 'text'
+        ? activeEditorPageRef.current || currentPage || 1
+        : currentPage || 1;
+
+    let selectedText = '';
+    const el = editorElementsRef.current[targetPage];
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      if (el && el.contains(sel.anchorNode)) {
+        const range = sel.getRangeAt(0);
+        if (isRangeInsideElement(range, el)) {
+          savedRangeRef.current = range.cloneRange();
+        }
+      }
+      selectedText = sel.toString().trim();
+    } else if (savedRangeRef.current && el && isRangeInsideElement(savedRangeRef.current, el)) {
+      selectedText = savedRangeRef.current.toString().trim();
+    }
+
+    const domText = el?.innerText?.trim();
+    const extractedPageText =
+      pagesText.find((p) => p.pageNumber === targetPage)?.text || '';
+    const fullText = domText || extractedPageText;
+    const currentHtml = el?.innerHTML || pageHtmlMapRef.current[targetPage] || '';
+
+    setAiSnapshot({
+      selectedText,
+      fullText,
+      currentHtml,
+      pageNumber: targetPage,
+    });
+    hideSoftKeyboard();
+    setDrawerOpen(false);
+    setSpellMenu(null);
+    setAiModalOpen(true);
+  };
+
+  const handleApplyAiPdfTextResult = (
+    html: string,
+    placement: 'replace-selection' | 'insert' | 'replace-all',
+  ) => {
+    if (editSubMode !== 'text') {
+      void handleSwitchEditSubMode('text');
+    }
+    const targetPage = aiSnapshot.pageNumber || activeEditorPageRef.current || currentPage || 1;
+    const el = editorElementsRef.current[targetPage];
+
+    if (placement === 'replace-all') {
+      if (el) {
+        el.innerHTML = html;
+      }
+      savedRangeRef.current = null;
+      handlePageHtmlChange(targetPage, html, true);
+      syncInlineFormats();
+      return;
+    }
+
+    if (!el) {
+      const prev = pageHtmlMapRef.current[targetPage] || '';
+      handlePageHtmlChange(targetPage, `${prev}${html}`, true);
+      return;
+    }
+
+    const isBlockInsertion = /<(table|hr|p|h[1-3]|ul|ol|blockquote|div)\b/i.test(html);
+    runCommandWithoutKeyboardPopup(el, savedRangeRef.current, () => {
+      if (placement === 'insert' && isBlockInsertion) {
+        prepareSelectionForBlockInsert(el, savedRangeRef.current);
+      } else if (placement === 'replace-selection' && savedRangeRef.current) {
+        const sel = window.getSelection();
+        if (sel && isRangeInsideElement(savedRangeRef.current, el)) {
+          sel.removeAllRanges();
+          sel.addRange(savedRangeRef.current);
+        }
+      }
+      window.document.execCommand('insertHTML', false, html);
+    });
+    handlePageHtmlChange(targetPage, el.innerHTML, true);
+    syncInlineFormats();
+  };
+
+  const handleApplyAiPdfNoteResult = (
+    noteText: string,
+    withWhiteBg: boolean,
+    customColors?: { bgColor?: string; textColor?: string },
+  ) => {
+    const clean = noteText.trim();
+    if (!clean) return;
+    if (!editMode) {
+      setEditMode(true);
+    }
+    if (editSubMode !== 'annotate') {
+      setEditSubMode('annotate');
+    }
+    const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const noteAnn: PdfTextAnnotation = {
+      id,
+      kind: 'text',
+      pageNumber: aiSnapshot.pageNumber || currentPage || 1,
+      xPct: 0.08,
+      yPct: 0.12,
+      text: clean,
+      fontSize: 12,
+      color: customColors?.textColor || '#0F172A',
+      bgFill: withWhiteBg ? customColors?.bgColor || '#FFFFFF' : undefined,
+      opacity: 1,
+      zIndex: draftAnnotationsRef.current.length + 1,
+    };
+    handleAddAnnotation(noteAnn);
+    setActiveTool('select');
+    setSelectedId(id);
   };
 
   const applyInlineStyle = (styles: Record<string, string>) => {
@@ -2457,6 +2580,19 @@ export default function WpsPdfViewer({
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleOpenAiAssistant}
+            disabled={isApplyingEdits || isExtractingPages || (!pdfDoc && loading)}
+            aria-label="Asistente IA para PDF"
+            title="Asistente IA"
+            className="inline-flex min-h-[40px] items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 text-xs font-semibold text-white shadow-2xs transition-opacity hover:opacity-95 disabled:opacity-50 whitespace-nowrap shrink-0"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>IA</span>
+          </button>
+
+          <button
+            type="button"
             disabled={isApplyingEdits || isExtractingPages || (!pdfDoc && loading)}
             onClick={() => void handleToggleEditMode()}
             aria-label={editMode ? 'Finalizar edición' : 'Editar PDF en esta vista'}
@@ -2577,6 +2713,15 @@ export default function WpsPdfViewer({
                 >
                   <ImageIcon className="h-3.5 w-3.5 text-purple-600" />
                   <span>Imagen</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenAiAssistant}
+                  className="inline-flex min-h-[34px] shrink-0 items-center gap-1 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 text-xs font-semibold text-white hover:opacity-95"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>IA</span>
                 </button>
 
                 <div className="mx-1 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
@@ -3459,6 +3604,7 @@ export default function WpsPdfViewer({
           spellErrorCount={flattenedSpellErrors.length}
           firstSpellErrorWord={flattenedSpellErrors[0]?.match.word}
           onJumpToNextSpellError={handleJumpToNextSpellError}
+          onOpenAiAssistant={handleOpenAiAssistant}
           comments={doc.comments}
           onAddComment={handleAddComment}
           onToggleCommentResolved={toggleCommentResolved}
@@ -3749,6 +3895,21 @@ export default function WpsPdfViewer({
           </div>
         </footer>
       )}
+
+      <AiEditAssistantModal
+        open={aiModalOpen}
+        mode={editMode && editSubMode === 'text' ? 'document' : 'pdf-annotate'}
+        documentTitle={doc.title}
+        fileType={doc.format}
+        selectedText={aiSnapshot.selectedText}
+        fullText={aiSnapshot.fullText}
+        currentHtml={aiSnapshot.currentHtml}
+        pdfPageNumber={aiSnapshot.pageNumber}
+        pdfTotalPages={Math.max(1, numPages)}
+        onClose={() => setAiModalOpen(false)}
+        onApplyDocumentResult={handleApplyAiPdfTextResult}
+        onApplyPdfNoteResult={handleApplyAiPdfNoteResult}
+      />
     </div>
   );
 }

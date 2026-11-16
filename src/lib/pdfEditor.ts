@@ -87,7 +87,18 @@ function sanitizeWinAnsi(input: string): string {
     .replace(/[\u2013\u2014]/g, '-')
     .replace(/\u2026/g, '...')
     .replace(/\u00A0/g, ' ')
-    .replace(/\u2022/g, '-');
+    .replace(/[\u2022\u25AA\u25B8\u25CF\u25E6]/g, '-')
+    .replace(/\u2192/g, '->')
+    .replace(/\u2190/g, '<-')
+    .replace(/\u2191/g, '^')
+    .replace(/\u2193/g, 'v')
+    .replace(/[\u2713\u2714\u2611]/g, '[v]')
+    .replace(/[\u2717\u2718\u2612]/g, '[x]')
+    .replace(/\u2265/g, '>=')
+    .replace(/\u2264/g, '<=')
+    .replace(/\u2260/g, '!=')
+    .replace(/\u00D7/g, 'x')
+    .replace(/\u00F7/g, '/');
 
   let out = '';
   for (let i = 0; i < normalized.length; i++) {
@@ -1239,7 +1250,23 @@ export async function buildPdfBytesFromPageHtmls(
       for (const tr of trs) {
         const cells = Array.from(tr.querySelectorAll('th, td')) as HTMLElement[];
         const isHeader = cells.some((c) => c.tagName.toLowerCase() === 'th');
-        const wrappedCells = cells.map((cell) => {
+        const trBgHex = parseColorString(tr.style?.backgroundColor);
+        const cellBgHexes = cells.map(
+          (cell) =>
+            parseColorString(cell.style?.backgroundColor) ||
+            trBgHex ||
+            (isHeader ? '#F2F5FA' : '#FFFFFF'),
+        );
+        const wrappedCells = cells.map((cell, cIdx) => {
+          const bgHex = cellBgHexes[cIdx] || '#FFFFFF';
+          const clean = bgHex.replace('#', '');
+          const isDarkBg =
+            /^[0-9a-fA-F]{6}$/.test(clean) &&
+            (0.299 * parseInt(clean.slice(0, 2), 16) +
+              0.587 * parseInt(clean.slice(2, 4), 16) +
+              0.114 * parseInt(clean.slice(4, 6), 16)) /
+              255 <
+              0.48;
           const runs: StyledRun[] = [];
           collectInlineRuns(
             cell,
@@ -1247,11 +1274,27 @@ export async function buildPdfBytesFromPageHtmls(
               bold: isHeader,
               italic: false,
               underline: false,
-              color: '#0f172a',
+              color: isDarkBg ? '#FFFFFF' : '#0f172a',
             },
             runs,
           );
-          return wrapRuns(runs, cellFontSize, Math.max(20, colWidth - cellPadX * 2));
+          const adjustedRuns = runs.map((r) => {
+            const cHex = r.color.replace('#', '');
+            if (!/^[0-9a-fA-F]{6}$/.test(cHex)) return r;
+            const lum =
+              (0.299 * parseInt(cHex.slice(0, 2), 16) +
+                0.587 * parseInt(cHex.slice(2, 4), 16) +
+                0.114 * parseInt(cHex.slice(4, 6), 16)) /
+              255;
+            if (!isDarkBg && lum > 0.78) {
+              return { ...r, color: '#0f172a' };
+            }
+            if (isDarkBg && lum < 0.35) {
+              return { ...r, color: '#ffffff' };
+            }
+            return r;
+          });
+          return wrapRuns(adjustedRuns, cellFontSize, Math.max(20, colWidth - cellPadX * 2));
         });
 
         const maxLines = Math.max(1, ...wrappedCells.map((wc) => wc.length));
@@ -1261,13 +1304,14 @@ export async function buildPdfBytesFromPageHtmls(
         for (let c = 0; c < colCount; c++) {
           const cellX = marginX + c * colWidth;
           const cellYBottom = cursorY - rowHeight;
+          const bgHex = cellBgHexes[c] || (isHeader ? '#F2F5FA' : '#FFFFFF');
 
           page.drawRectangle({
             x: cellX,
             y: cellYBottom,
             width: colWidth,
             height: rowHeight,
-            color: isHeader ? rgb(0.95, 0.96, 0.98) : rgb(1, 1, 1),
+            color: parseHexRgb(bgHex),
             borderColor: rgb(0.8, 0.84, 0.89),
             borderWidth: 0.75,
           });

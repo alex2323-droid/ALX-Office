@@ -102,6 +102,12 @@ import {
 } from './CanvaControls';
 import { SpellCheckMenu, SpellContextMenuState } from './SpellCheckMenu';
 import type { WordActiveFormats } from './WpsWordEditingBar';
+import AiEditAssistantModal from './AiEditAssistantModal';
+import type {
+  AiSlideDesignContext,
+  AiSlideEditResponse,
+} from '../lib/aiEditorClient';
+import { buildWpsSlideFromAiProposal } from '../lib/aiSlideBuilder';
 
 interface PptHistorySnapshot {
   slides: WpsSlide[];
@@ -1295,6 +1301,18 @@ function SlideStage({
     }
 
     if (el.type === 'table') {
+      const cellBg = el.cellBgColor || 'rgba(255, 255, 255, 0.96)';
+      const cleanHex = cellBg.trim().replace('#', '');
+      let isDarkCellBg = false;
+      if (/^[0-9a-fA-F]{6}$/.test(cleanHex)) {
+        const r = parseInt(cleanHex.slice(0, 2), 16);
+        const g = parseInt(cleanHex.slice(2, 4), 16);
+        const b = parseInt(cleanHex.slice(4, 6), 16);
+        isDarkCellBg = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.48;
+      }
+      const cellTextColor = isDarkCellBg ? '#F8FAFC' : '#0F172A';
+      const rowBorderColor = isDarkCellBg ? 'rgba(148, 163, 184, 0.25)' : '#E2E8F0';
+
       return (
         <div
           key={el.id}
@@ -1311,10 +1329,11 @@ function SlideStage({
             ...outerStyle,
             borderRadius: `${el.borderRadiusPx ?? 6}px`,
             borderColor: el.borderColor || 'rgba(203, 213, 225, 0.8)',
-            backgroundColor: el.cellBgColor || 'rgba(255, 255, 255, 0.96)',
+            backgroundColor: cellBg,
+            color: cellTextColor,
             boxShadow: getShadowCss(el.shadow),
           }}
-          className="overflow-auto border text-slate-900"
+          className="overflow-auto border"
         >
           <table className="w-full border-collapse text-left text-[13px]">
             <thead>
@@ -1325,7 +1344,11 @@ function SlideStage({
                 }}
               >
                 {el.headers.map((h, i) => (
-                  <th key={i} className="border-b border-slate-300 px-2.5 py-1.5 font-semibold">
+                  <th
+                    key={i}
+                    style={{ borderColor: rowBorderColor }}
+                    className="border-b px-2.5 py-1.5 font-semibold"
+                  >
                     {editMode && onChangeSlide && isSelected ? (
                       <input
                         type="text"
@@ -1357,7 +1380,14 @@ function SlideStage({
             </thead>
             <tbody>
               {el.rows.map((row, rIdx) => (
-                <tr key={rIdx} className="border-b border-slate-200 last:border-b-0">
+                <tr
+                  key={rIdx}
+                  style={{
+                    color: cellTextColor,
+                    borderBottom:
+                      rIdx < el.rows.length - 1 ? `1px solid ${rowBorderColor}` : undefined,
+                  }}
+                >
                   {row.map((cell, cIdx) => (
                     <td key={cIdx} className="px-2.5 py-1.5">
                       {editMode && onChangeSlide && isSelected ? (
@@ -2222,6 +2252,7 @@ export default function WpsPptViewer({
   const [elementPanel, setElementPanel] = useState<CanvaElementPanel>(null);
   const [copiedStyle, setCopiedStyle] = useState<CopiedElementStyle | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   const uploadImageInputRef = useRef<HTMLInputElement | null>(null);
   const bgImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -2704,6 +2735,127 @@ export default function WpsPptViewer({
     commitSlides(next, true);
     setCurrentIdx(target);
   };
+
+  const activeSlideTexts = useMemo(() => {
+    const texts: string[] = [];
+    if (activeSlide.subtitle) texts.push(activeSlide.subtitle);
+    if (activeSlide.bullets && activeSlide.bullets.length > 0) {
+      texts.push(...activeSlide.bullets);
+    }
+    if (activeSlide.elements) {
+      for (const el of activeSlide.elements) {
+        if (el.type === 'text') {
+          const line = el.paragraphs
+            .map((p) => p.runs.map((r) => r.text).join(''))
+            .join(' ')
+            .trim();
+          if (line && line !== activeSlide.title) texts.push(line);
+        } else if (el.type === 'diagram') {
+          texts.push(...el.items);
+        } else if (el.type === 'table') {
+          texts.push(el.headers.join(' | '));
+          el.rows.forEach((r) => texts.push(r.join(' | ')));
+        }
+      }
+    }
+    if (activeSlide.notes) texts.push(`Notas: ${activeSlide.notes}`);
+    return Array.from(new Set(texts)).slice(0, 12);
+  }, [activeSlide]);
+
+  const activeSlideContext = useMemo<AiSlideDesignContext>(() => {
+    const firstTextEl = activeSlide.elements?.find((e) => e.type === 'text');
+    const elementsSummary = (activeSlide.elements || [])
+      .slice(0, 12)
+      .map((el) => {
+        if (el.type === 'text') {
+          const textSample = el.paragraphs
+            .map((p) => p.runs.map((r) => r.text).join(''))
+            .join(' ')
+            .trim()
+            .slice(0, 50);
+          return `Texto(${el.isTitle ? 'título' : 'cuerpo'}, bg:${el.fillColor || 'none'}, border:${el.borderColor || 'none'}, fuente:${el.fontFamily || 'default'}): "${textSample}"`;
+        }
+        if (el.type === 'chart') {
+          return `Gráfico(${el.chartKind}, título:"${el.title || ''}")`;
+        }
+        if (el.type === 'table') {
+          return `Tabla(${el.headers.join('/')})`;
+        }
+        if (el.type === 'diagram') {
+          return `Diagrama(${el.items.slice(0, 4).join(' -> ')})`;
+        }
+        if (el.type === 'shape') {
+          return `Forma(${el.shapeKind}, fill:${el.fillColor || 'none'})`;
+        }
+        return `Imagen(${el.alt || 'gráfico'})`;
+      });
+
+    return {
+      backgroundColor: activeSlide.backgroundColor,
+      backgroundGradient: activeSlide.backgroundGradient,
+      fontFamily:
+        firstTextEl && firstTextEl.type === 'text'
+          ? firstTextEl.fontFamily
+          : undefined,
+      elementsSummary: elementsSummary.join('\n'),
+      otherSlideTitles: slides
+        .filter((s) => s.id !== activeSlide.id)
+        .map((s) => s.title)
+        .slice(0, 8),
+    };
+  }, [activeSlide, slides]);
+
+  const handleApplyAiSlideResult = useCallback(
+    (result: AiSlideEditResponse, target: 'current' | 'new-slide') => {
+      if (!onUpdateDocument) return;
+      const now = Date.now();
+      const targetIndex =
+        target === 'new-slide' ? currentIdx + 2 : activeSlide.index;
+      const builtSlide = buildWpsSlideFromAiProposal(
+        result,
+        targetIndex,
+        `s-${now}`,
+      );
+
+      if (target === 'new-slide') {
+        const next = [
+          ...slides.slice(0, currentIdx + 1),
+          builtSlide,
+          ...slides.slice(currentIdx + 1),
+        ];
+        commitSlides(next, true);
+        setCurrentIdx(currentIdx + 1);
+      } else {
+        updateActiveSlide(
+          (prev) => ({
+            ...prev,
+            title: builtSlide.title,
+            subtitle: builtSlide.subtitle,
+            bullets: builtSlide.bullets,
+            notes: result.notes || prev.notes,
+            backgroundColor: builtSlide.backgroundColor,
+            backgroundGradient: builtSlide.backgroundGradient,
+            backgroundImage: undefined,
+            elements: builtSlide.elements,
+          }),
+          true,
+        );
+      }
+
+      setSelectedElementId(null);
+      setEditingTextId(null);
+      setViewMode('slide');
+      setEditMode(true);
+    },
+    [
+      activeSlide.index,
+      commitSlides,
+      currentIdx,
+      onUpdateDocument,
+      slides,
+      updateActiveSlide,
+    ],
+  );
 
   // Canva Element Creators (auto-promote structured slides into rich canvas)
   const insertCanvasElement = useCallback(
@@ -3485,6 +3637,25 @@ export default function WpsPptViewer({
                     ? `${flattenedSpellErrors.length}`
                     : 'OK'}
               </span>
+            </button>
+          )}
+
+          {onUpdateDocument && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                hideSoftKeyboard();
+                setCanvasPanel(null);
+                setElementPanel(null);
+                setAiModalOpen(true);
+              }}
+              aria-label="Asistente IA de diapositivas"
+              title="Asistente IA"
+              className="inline-flex min-h-[40px] items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 text-xs font-semibold text-white shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>IA</span>
             </button>
           )}
 
@@ -5640,6 +5811,20 @@ export default function WpsPptViewer({
             </>
           ) : (
             <>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  hideSoftKeyboard();
+                  setCanvasPanel(null);
+                  setAiModalOpen(true);
+                }}
+                className="flex min-h-[44px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl bg-violet-50 px-3.5 text-[11px] font-semibold text-[#7C3AED] hover:bg-violet-100 dark:bg-violet-950/60 dark:text-violet-300"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>IA</span>
+              </button>
+
               {(
                 [
                   { id: 'design', label: 'Diseño', icon: LayoutTemplate },
@@ -5739,6 +5924,18 @@ export default function WpsPptViewer({
           </div>
         </footer>
       )}
+
+      <AiEditAssistantModal
+        open={aiModalOpen}
+        mode="slide"
+        documentTitle={doc.title}
+        fileType={doc.format}
+        slideTitle={activeSlide.title}
+        slideTexts={activeSlideTexts}
+        slideContext={activeSlideContext}
+        onClose={() => setAiModalOpen(false)}
+        onApplySlideResult={handleApplyAiSlideResult}
+      />
     </div>
   );
 }
