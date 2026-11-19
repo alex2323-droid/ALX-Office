@@ -13,11 +13,15 @@ import {
   Image as ImageIcon,
   IndentDecrease,
   IndentIncrease,
+  FileText,
   Italic,
   Link2,
   List,
   ListOrdered,
+  Loader2,
   MessageSquarePlus,
+  Mic,
+  MicOff,
   Minus,
   Paintbrush,
   Sparkles,
@@ -29,6 +33,7 @@ import {
   Underline,
 } from 'lucide-react';
 import { WpsComment } from '../data/wpsDocuments';
+import { requestAiTranscribeAudio } from '../lib/aiEditorClient';
 import {
   createChecklistHtml,
   escapeHtmlText,
@@ -134,6 +139,98 @@ export default function WpsWordEditingBar({
   const [newCommentText, setNewCommentText] = useState('');
   const [customTextColor, setCustomTextColor] = useState('#7c3aed');
   const [customBgColor, setCustomBgColor] = useState('#fef08a');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcribeNotice, setTranscribeNotice] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const handleStartVoiceDictation = async () => {
+    try {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        setTranscribeNotice('Tu navegador no permite captura de micrófono.');
+        setTimeout(() => setTranscribeNotice(null), 3000);
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mimeType =
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
+            ? 'audio/mp4'
+            : '';
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || 'audio/webm',
+        });
+        if (blob.size < 500) {
+          setIsTranscribing(false);
+          setIsRecording(false);
+          return;
+        }
+        setIsTranscribing(true);
+        setTranscribeNotice('Transcribiendo con Whisper V3...');
+        try {
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const base64Audio = reader.result as string;
+            try {
+              const res = await requestAiTranscribeAudio({
+                audioBase64: base64Audio,
+                mimeType: blob.type || 'audio/webm',
+                language: 'es',
+              });
+              if (res.text) {
+                onInsertHtml(`${escapeHtmlText(res.text)} `);
+                setTranscribeNotice(`Whisper: "${res.text.slice(0, 36)}..."`);
+                setTimeout(() => setTranscribeNotice(null), 4000);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : 'Error en transcripción';
+              setTranscribeNotice(`Error: ${msg}`);
+              setTimeout(() => setTranscribeNotice(null), 4000);
+            } finally {
+              setIsTranscribing(false);
+              setIsRecording(false);
+            }
+          };
+          reader.readAsDataURL(blob);
+        } catch {
+          setIsTranscribing(false);
+          setIsRecording(false);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250);
+      setIsRecording(true);
+      setTranscribeNotice('🎙️ Grabando... Toca el botón para terminar y transcribir');
+    } catch (err) {
+      console.error('Error accediendo al micrófono:', err);
+      setTranscribeNotice('Permiso de micrófono no otorgado');
+      setTimeout(() => setTranscribeNotice(null), 3000);
+      setIsRecording(false);
+    }
+  };
+
+  const handleStopVoiceDictation = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  };
 
   const handleInsertTable = () => {
     const headerCells = Array.from({ length: tableCols })
@@ -720,6 +817,47 @@ export default function WpsWordEditingBar({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() =>
                         onInsertHtml(
+                          '<div style="page-break-after: always; break-after: page; height: 32px; border-bottom: 2px dashed #94a3b8; margin: 24px 0; display: flex; align-items: center; justify-content: center; color: #475569; font-size: 12px; font-weight: 600;" contenteditable="false">Salto de página</div><p><br/></p>'
+                        )
+                      }
+                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <FileText className="h-4 w-4 text-violet-600" />
+                      <span>Salto de página</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() =>
+                        onInsertHtml(
+                          '<div style="border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 20px; font-size: 11px; color: #64748b; display: flex; justify-content: space-between;" contenteditable="false"><span>ALX Office · Documento Oficial</span><span>Fecha: ' +
+                            new Date().toLocaleDateString('es-ES') +
+                            '</span></div><p><br/></p>',
+                        )
+                      }
+                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <FileText className="h-4 w-4 text-blue-600" />
+                      <span>Cabecera</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() =>
+                        onInsertHtml(
+                          '<div style="border-top: 1px solid #cbd5e1; padding-top: 6px; margin-top: 24px; font-size: 11px; color: #64748b; display: flex; justify-content: space-between;" contenteditable="false"><span>Confidencial · Uso interno</span><span>Página 1</span></div><p><br/></p>',
+                        )
+                      }
+                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <FileText className="h-4 w-4 text-emerald-600" />
+                      <span>Pie de página</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() =>
+                        onInsertHtml(
                           `${new Date().toLocaleDateString('es-ES', {
                             day: '2-digit',
                             month: 'long',
@@ -730,6 +868,37 @@ export default function WpsWordEditingBar({
                       className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     >
                       <span>Fecha actual</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        if (isRecording) {
+                          handleStopVoiceDictation();
+                        } else {
+                          handleStartVoiceDictation();
+                        }
+                      }}
+                      className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-3.5 text-xs font-medium transition-colors ${
+                        isRecording
+                          ? 'border-rose-300 bg-rose-50 text-rose-700 animate-pulse dark:bg-rose-950/40 dark:text-rose-300'
+                          : isTranscribing
+                            ? 'border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                            : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      {isTranscribing ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+                      ) : (
+                        <Mic className={`h-4 w-4 ${isRecording ? 'text-rose-600' : 'text-rose-500'}`} />
+                      )}
+                      <span>
+                        {isTranscribing
+                          ? 'Transcribiendo...'
+                          : isRecording
+                            ? 'Detener dictado'
+                            : 'Dictado por voz'}
+                      </span>
                     </button>
                   </div>
 
@@ -942,6 +1111,13 @@ export default function WpsWordEditingBar({
         </div>
       )}
 
+      {/* Transcribe / Voice Dictation Notification Badge */}
+      {transcribeNotice && (
+        <div className="no-print pointer-events-none fixed bottom-[58px] left-1/2 -translate-x-1/2 z-50 rounded-full border border-slate-700 bg-slate-900/95 px-4 py-1.5 text-xs font-medium text-white shadow-xl backdrop-blur-md dark:border-slate-600 dark:bg-slate-800/95">
+          {transcribeNotice}
+        </div>
+      )}
+
       {/* Ergonomic Bottom Quick-Formatting Bar (52px) */}
       <footer className="no-print fixed bottom-0 left-0 right-0 z-40 flex h-[52px] items-center justify-between gap-1 border-t border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
         <div className="flex items-center overflow-x-auto">
@@ -1048,6 +1224,38 @@ export default function WpsWordEditingBar({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (isRecording) {
+                handleStopVoiceDictation();
+              } else {
+                handleStartVoiceDictation();
+              }
+            }}
+            aria-label="Dictado por voz Whisper"
+            title="Dictar con Whisper AI"
+            className={`inline-flex min-h-[40px] items-center gap-1 rounded-xl px-2.5 text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${
+              isRecording
+                ? 'bg-rose-600 text-white animate-pulse shadow-md ring-2 ring-rose-400'
+                : isTranscribing
+                  ? 'bg-amber-500 text-white'
+                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+            }`}
+          >
+            {isTranscribing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : isRecording ? (
+              <MicOff className="h-3.5 w-3.5" />
+            ) : (
+              <Mic className="h-3.5 w-3.5 text-rose-500" />
+            )}
+            <span className="hidden xs:inline">
+              {isTranscribing ? 'Procesando' : isRecording ? 'Parar' : 'Dictar'}
+            </span>
+          </button>
+
           {onOpenAiAssistant && (
             <button
               type="button"

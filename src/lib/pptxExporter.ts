@@ -283,6 +283,45 @@ function dataUrlToBinary(dataUrl: string): { ext: 'png' | 'jpg'; bytes: Uint8Arr
   }
 }
 
+async function imageSrcToBinary(src: string): Promise<{ ext: 'png' | 'jpg'; bytes: Uint8Array } | null> {
+  const direct = dataUrlToBinary(src);
+  if (direct) return direct;
+
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.document !== 'undefined' &&
+    /^data:image\/svg\+xml/i.test(src.trim())
+  ) {
+    try {
+      const pngDataUrl = await new Promise<string | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = window.document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 500;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(null);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, 800, 500);
+            resolve(canvas.toDataURL('image/png'));
+          } catch {
+            resolve(null);
+          }
+        };
+        img.onerror = () => resolve(null);
+        img.src = src;
+      });
+      if (pngDataUrl) return dataUrlToBinary(pngDataUrl);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function exportDocumentToPptxBytes(doc: WpsDocument): Promise<Uint8Array> {
   const zip = new JSZip();
   const slides: WpsSlide[] =
@@ -530,7 +569,7 @@ export async function exportDocumentToPptxBytes(doc: WpsDocument): Promise<Uint8
           ),
         );
       } else if (el.type === 'image') {
-        const decoded = dataUrlToBinary(el.src);
+        const decoded = await imageSrcToBinary(el.src);
         if (decoded) {
           const mediaName = `image${mediaCounter++}.${decoded.ext}`;
           if (decoded.ext === 'png') slideMediaFlags.hasPng = true;

@@ -14,8 +14,6 @@ import {
   ChevronRight,
   Copy,
   Download,
-  FlipHorizontal,
-  FlipVertical,
   Image as ImageIcon,
   Italic,
   Layers,
@@ -93,6 +91,7 @@ import {
   CanvaChartRenderer,
   CanvaColorSwatchRow,
   CanvaFloatingActionBar,
+  CanvaPositionControls,
   CanvaSelectionBox,
   CanvaShapeSvg,
   ResizeHandle,
@@ -100,6 +99,12 @@ import {
   getShadowCss,
   getTextEffectStyle,
 } from './CanvaControls';
+import {
+  SnapGuide,
+  computeDeltaRotation,
+  computeRotatedResize,
+  computeSnapDrag,
+} from '../lib/canvaTransforms';
 import { SpellCheckMenu, SpellContextMenuState } from './SpellCheckMenu';
 import type { WordActiveFormats } from './WpsWordEditingBar';
 import AiEditAssistantModal from './AiEditAssistantModal';
@@ -145,11 +150,6 @@ type CanvaElementPanel =
   | 'opacity'
   | 'position'
   | 'data';
-
-interface SnapGuide {
-  axis: 'x' | 'y';
-  pct: number;
-}
 
 interface CopiedElementStyle {
   fillColor?: string;
@@ -809,6 +809,7 @@ function SlideStage({
     origW: number;
     origH: number;
     origRot: number;
+    startAngleDeg: number;
     centerPxX: number;
     centerPxY: number;
     moved: boolean;
@@ -901,127 +902,54 @@ function SlideStage({
       if (!act.moved) return;
 
       if (act.mode === 'drag') {
-        let nextX = act.origX + dxPct;
-        let nextY = act.origY + dyPct;
-
-        // Canva smart snap alignment guides
-        const guides: SnapGuide[] = [];
-        const threshold = 1.25;
-        const elCenterX = nextX + act.origW / 2;
-        const elCenterY = nextY + act.origH / 2;
-
-        // Canvas center & margins
-        const xTargets = [
-          { val: 50, apply: 50 - act.origW / 2, guide: 50 },
-          { val: 6, apply: 6, guide: 6 },
-          { val: 94, apply: 94 - act.origW, guide: 94 },
-        ];
-        for (const t of xTargets) {
-          const check = t.guide === 50 ? elCenterX : t.guide === 6 ? nextX : nextX + act.origW;
-          if (Math.abs(check - t.val) < threshold) {
-            nextX = t.apply;
-            guides.push({ axis: 'x', pct: t.guide });
-            break;
-          }
-        }
-
-        const yTargets = [
-          { val: 50, apply: 50 - act.origH / 2, guide: 50 },
-          { val: 8, apply: 8, guide: 8 },
-          { val: 92, apply: 92 - act.origH, guide: 92 },
-        ];
-        for (const t of yTargets) {
-          const check = t.guide === 50 ? elCenterY : t.guide === 8 ? nextY : nextY + act.origH;
-          if (Math.abs(check - t.val) < threshold) {
-            nextY = t.apply;
-            guides.push({ axis: 'y', pct: t.guide });
-            break;
-          }
-        }
-
-        // Snap to sibling elements' centers & edges
         const siblings = (slide.elements || []).filter((s) => s.id !== act.elId);
-        for (const sib of siblings) {
-          const sibCx = sib.xPct + sib.wPct / 2;
-          const sibCy = sib.yPct + sib.hPct / 2;
-          if (Math.abs(nextX + act.origW / 2 - sibCx) < threshold) {
-            nextX = sibCx - act.origW / 2;
-            guides.push({ axis: 'x', pct: sibCx });
-          } else if (Math.abs(nextX - sib.xPct) < threshold) {
-            nextX = sib.xPct;
-            guides.push({ axis: 'x', pct: sib.xPct });
-          }
-          if (Math.abs(nextY + act.origH / 2 - sibCy) < threshold) {
-            nextY = sibCy - act.origH / 2;
-            guides.push({ axis: 'y', pct: sibCy });
-          } else if (Math.abs(nextY - sib.yPct) < threshold) {
-            nextY = sib.yPct;
-            guides.push({ axis: 'y', pct: sib.yPct });
-          }
-        }
-
-        nextX = Math.max(-20, Math.min(95, Math.round(nextX * 10) / 10));
-        nextY = Math.max(-20, Math.min(95, Math.round(nextY * 10) / 10));
+        const { xPct, yPct, guides } = computeSnapDrag({
+          origX: act.origX,
+          origY: act.origY,
+          origW: act.origW,
+          origH: act.origH,
+          dxPct,
+          dyPct,
+          siblings,
+        });
         setSnapGuides(guides);
-        setLiveBadge(`X ${Math.round(nextX)}% · Y ${Math.round(nextY)}%`);
-        updateSingleElement(act.elId, { xPct: nextX, yPct: nextY }, false);
+        setLiveBadge(`X ${Math.round(xPct)}% · Y ${Math.round(yPct)}%`);
+        updateSingleElement(act.elId, { xPct, yPct }, false);
         return;
       }
 
       if (act.mode === 'resize' && act.handle) {
-        let nextX = act.origX;
-        let nextY = act.origY;
-        let nextW = act.origW;
-        let nextH = act.origH;
-        const minW = 5;
-        const minH = 4;
-
-        if (act.handle.includes('e')) {
-          nextW = Math.max(minW, act.origW + dxPct);
-        }
-        if (act.handle.includes('s')) {
-          nextH = Math.max(minH, act.origH + dyPct);
-        }
-        if (act.handle.includes('w')) {
-          const clampedDx = Math.min(act.origW - minW, dxPct);
-          nextX = act.origX + clampedDx;
-          nextW = act.origW - clampedDx;
-        }
-        if (act.handle.includes('n')) {
-          const clampedDy = Math.min(act.origH - minH, dyPct);
-          nextY = act.origY + clampedDy;
-          nextH = act.origH - clampedDy;
-        }
-
-        nextX = Math.round(nextX * 10) / 10;
-        nextY = Math.round(nextY * 10) / 10;
-        nextW = Math.round(nextW * 10) / 10;
-        nextH = Math.round(nextH * 10) / 10;
-        setLiveBadge(`${Math.round(nextW)}% × ${Math.round(nextH)}%`);
-        updateSingleElement(
-          act.elId,
-          { xPct: nextX, yPct: nextY, wPct: nextW, hPct: nextH },
-          false,
-        );
+        const { xPct, yPct, wPct, hPct } = computeRotatedResize({
+          handle: act.handle,
+          origX: act.origX,
+          origY: act.origY,
+          origW: act.origW,
+          origH: act.origH,
+          rotationDeg: act.origRot,
+          dxPx: e.clientX - act.startClientX,
+          dyPx: e.clientY - act.startClientY,
+          stageWidth: stageRect.width,
+          stageHeight: stageRect.height,
+          minWPct: 5,
+          minHPct: 4,
+          keepAspectRatio: e.shiftKey,
+        });
+        setLiveBadge(`${Math.round(wPct)}% × ${Math.round(hPct)}%`);
+        updateSingleElement(act.elId, { xPct, yPct, wPct, hPct }, false);
         return;
       }
 
       if (act.mode === 'rotate') {
-        const angleRad = Math.atan2(
-          e.clientY - act.centerPxY,
-          e.clientX - act.centerPxX,
-        );
-        let deg = Math.round(((angleRad * 180) / Math.PI) - 90);
-        deg = ((deg % 360) + 360) % 360;
-        if (deg > 180) deg -= 360;
-        // Soft snap to 0, ±45, ±90, 180
-        for (const snap of [0, 45, -45, 90, -90, 135, -135, 180, -180]) {
-          if (Math.abs(deg - snap) <= 4) {
-            deg = snap;
-            break;
-          }
-        }
-        setLiveBadge(`${deg}°`);
+        const { deg, snapped } = computeDeltaRotation({
+          startAngleDeg: act.startAngleDeg,
+          origRotDeg: act.origRot,
+          centerPxX: act.centerPxX,
+          centerPxY: act.centerPxY,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          snapStep15: e.shiftKey,
+        });
+        setLiveBadge(snapped ? `${deg}° · Ajustado` : `${deg}°`);
         updateSingleElement(act.elId, { rotationDeg: deg }, false);
       }
     };
@@ -1084,6 +1012,7 @@ function SlideStage({
       origW: el.wPct,
       origH: el.hPct,
       origRot: el.rotationDeg || 0,
+      startAngleDeg: 0,
       centerPxX: 0,
       centerPxY: 0,
       moved: false,
@@ -1109,6 +1038,7 @@ function SlideStage({
       origW: el.wPct,
       origH: el.hPct,
       origRot: el.rotationDeg || 0,
+      startAngleDeg: 0,
       centerPxX: 0,
       centerPxY: 0,
       moved: false,
@@ -1123,6 +1053,7 @@ function SlideStage({
     const rect = stageEl.getBoundingClientRect();
     const cx = rect.left + ((el.xPct + el.wPct / 2) / 100) * rect.width;
     const cy = rect.top + ((el.yPct + el.hPct / 2) / 100) * rect.height;
+    const startAngleDeg = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
 
     interactionRef.current = {
       mode: 'rotate',
@@ -1134,6 +1065,7 @@ function SlideStage({
       origW: el.wPct,
       origH: el.hPct,
       origRot: el.rotationDeg || 0,
+      startAngleDeg,
       centerPxX: cx,
       centerPxY: cy,
       moved: false,
@@ -1158,8 +1090,9 @@ function SlideStage({
       height: `${el.hPct}%`,
       zIndex: isSelected ? Math.max(el.zIndex, 40) : el.zIndex,
       transform: rotStr || undefined,
+      transformOrigin: 'center center',
       opacity: el.opacity ?? 1,
-      touchAction: editMode && isSelected && !isEditingThisText ? 'none' : undefined,
+      touchAction: editMode && !isEditingThisText && !el.locked ? 'none' : undefined,
     };
 
     const selectionOverlay = isSelected ? (
@@ -5018,104 +4951,55 @@ export default function WpsPptViewer({
               )}
 
               {selectedElement && elementPanel === 'position' && (
-                <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleReorderLayer(selectedElement.id, 'front')}
-                      className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
-                    >
-                      <ArrowUp className="h-3.5 w-3.5" />
-                      <span>Al frente</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReorderLayer(selectedElement.id, 'forward')}
-                      className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
-                    >
-                      <span>Adelante</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReorderLayer(selectedElement.id, 'backward')}
-                      className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
-                    >
-                      <span>Atrás</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReorderLayer(selectedElement.id, 'back')}
-                      className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
-                    >
-                      <ArrowDown className="h-3.5 w-3.5" />
-                      <span>Al fondo</span>
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                    {(
-                      [
-                        { m: 'left', label: 'Izq.' },
-                        { m: 'centerH', label: 'Centro H' },
-                        { m: 'right', label: 'Der.' },
-                        { m: 'top', label: 'Arriba' },
-                        { m: 'centerV', label: 'Centro V' },
-                        { m: 'bottom', label: 'Abajo' },
-                      ] as const
-                    ).map((a) => (
-                      <button
-                        key={a.m}
-                        type="button"
-                        onClick={() => alignElementOnCanvas(a.m)}
-                        className="min-h-[36px] rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
-                      >
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {(selectedElement.type === 'shape' ||
+                <CanvaPositionControls
+                  rotationDeg={selectedElement.rotationDeg || 0}
+                  flippedX={Boolean('flippedX' in selectedElement && selectedElement.flippedX)}
+                  flippedY={Boolean('flippedY' in selectedElement && selectedElement.flippedY)}
+                  locked={Boolean(selectedElement.locked)}
+                  canFlip={
+                    selectedElement.type === 'shape' ||
                     selectedElement.type === 'image' ||
-                    selectedElement.type === 'text') && (
-                    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateSelectedElement({ flippedX: !selectedElement.flippedX }, true)
-                        }
-                        className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium ${
-                          selectedElement.flippedX
-                            ? 'border-[#7C3AED] bg-violet-50 text-[#7C3AED]'
-                            : 'border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        <FlipHorizontal className="h-3.5 w-3.5" />
-                        <span>Voltear H</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateSelectedElement({ flippedY: !selectedElement.flippedY }, true)
-                        }
-                        className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium ${
-                          selectedElement.flippedY
-                            ? 'border-[#7C3AED] bg-violet-50 text-[#7C3AED]'
-                            : 'border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        <FlipVertical className="h-3.5 w-3.5" />
-                        <span>Voltear V</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedElement({ rotationDeg: 0 }, true)}
-                        className="min-h-[38px] rounded-lg border border-slate-200 px-3 text-xs font-medium dark:border-slate-700"
-                      >
-                        Rotación 0°
-                      </button>
-                    </div>
-                  )}
-                </div>
+                    selectedElement.type === 'text'
+                  }
+                  onChangeRotation={(deg, immediate) =>
+                    updateSelectedElement({ rotationDeg: deg }, immediate)
+                  }
+                  onCommitRotation={() => history.commitPending()}
+                  onNudge={(dx, dy) =>
+                    updateSelectedElement(
+                      {
+                        xPct: Math.round((selectedElement.xPct + dx) * 10) / 10,
+                        yPct: Math.round((selectedElement.yPct + dy) * 10) / 10,
+                      },
+                      true,
+                    )
+                  }
+                  onReorderLayer={(dir) => handleReorderLayer(selectedElement.id, dir)}
+                  onAlign={(mode) => alignElementOnCanvas(mode)}
+                  onToggleFlipX={() =>
+                    updateSelectedElement(
+                      {
+                        flippedX: !(
+                          'flippedX' in selectedElement && selectedElement.flippedX
+                        ),
+                      },
+                      true,
+                    )
+                  }
+                  onToggleFlipY={() =>
+                    updateSelectedElement(
+                      {
+                        flippedY: !(
+                          'flippedY' in selectedElement && selectedElement.flippedY
+                        ),
+                      },
+                      true,
+                    )
+                  }
+                  onToggleLock={() =>
+                    updateSelectedElement({ locked: !selectedElement.locked }, true)
+                  }
+                />
               )}
 
               {selectedElement && elementPanel === 'data' && selectedElement.type === 'chart' && (

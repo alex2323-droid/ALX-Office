@@ -1,0 +1,335 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión del release (ej. v5.0.0)'
+        required: false
+        default: 'v5.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Install dependencies and build PWA
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+
+      - name: Prepare Capacitor Android project (com.alx.office)
+        run: |
+          npm install --no-save --legacy-peer-deps @capacitor/core@^8.0.0 @capacitor/cli@^8.0.0 @capacitor/android@^8.0.0
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Inject Android "Open With" intent filters and native file bridge
+        run: |
+          node -e '
+            const fs = require("fs");
+            const manifestPath = "android/app/src/main/AndroidManifest.xml";
+            const filtersPath = "public/android-intent-filters.xml";
+            if (fs.existsSync(manifestPath) && fs.existsSync(filtersPath)) {
+              let manifest = fs.readFileSync(manifestPath, "utf8");
+              if (!manifest.includes("android.permission.RECORD_AUDIO")) {
+                manifest = manifest.replace(
+                  /<application\b/,
+                  `<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n\n    <application`
+                );
+              }
+              if (!manifest.includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
+                const rawFilters = fs.readFileSync(filtersPath, "utf8").replace(/<!--[\s\S]*?-->/g, "").trim();
+                const mainIdx = manifest.indexOf("android.intent.action.MAIN");
+                const closeTagIdx = mainIdx >= 0 ? manifest.indexOf("</activity>", mainIdx) : manifest.indexOf("</activity>");
+                if (closeTagIdx >= 0) {
+                  manifest = manifest.slice(0, closeTagIdx) + `\n        ${rawFilters}\n        ` + manifest.slice(closeTagIdx);
+                }
+              }
+              fs.writeFileSync(manifestPath, manifest);
+            }
+
+            const mainActivityPath = "android/app/src/main/java/com/alx/office/MainActivity.java";
+            if (fs.existsSync(mainActivityPath)) {
+              const javaCode = `package com.alx.office;
+
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.util.Base64;
+import android.webkit.JavascriptInterface;
+import com.getcapacitor.BridgeActivity;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import org.json.JSONObject;
+
+public class MainActivity extends BridgeActivity {
+  private String pendingFileJson = null;
+
+  @Override
+  public void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    if (this.bridge != null && this.bridge.getWebView() != null) {
+      this.bridge.getWebView().addJavascriptInterface(new AlxNativeBridge(), "AlxNativeBridge");
+    }
+    handleIncomingIntent(getIntent());
+  }
+
+  @Override
+  public void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    handleIncomingIntent(intent);
+  }
+
+  private void handleIncomingIntent(Intent intent) {
+    if (intent == null) return;
+    String action = intent.getAction();
+    Uri uri = null;
+    if (Intent.ACTION_VIEW.equals(action)) {
+      uri = intent.getData();
+    } else if (Intent.ACTION_SEND.equals(action)) {
+      uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+    }
+    if (uri == null) return;
+
+    try {
+      String mimeType = getContentResolver().getType(uri);
+      String name = resolveFileName(uri, mimeType);
+      InputStream is = getContentResolver().openInputStream(uri);
+      if (is == null) return;
+      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      byte[] buf = new byte[8192];
+      int read;
+      int total = 0;
+      int maxBytes = 25 * 1024 * 1024;
+      while ((read = is.read(buf)) != -1) {
+        total += read;
+        if (total > maxBytes) {
+          is.close();
+          return;
+        }
+        baos.write(buf, 0, read);
+      }
+      is.close();
+
+      String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+      JSONObject json = new JSONObject();
+      json.put("name", name);
+      json.put("mimeType", mimeType != null ? mimeType : "application/octet-stream");
+      json.put("base64", base64);
+      pendingFileJson = json.toString();
+
+      if (this.bridge != null && this.bridge.getWebView() != null) {
+        this.bridge.getWebView().post(() -> {
+          if (this.bridge != null && this.bridge.getWebView() != null) {
+            this.bridge.getWebView().evaluateJavascript(
+              "window.dispatchEvent(new Event(\x27alx-native-file\x27));",
+              null
+            );
+          }
+        });
+      }
+    } catch (Exception ignored) {
+    }
+  }
+
+  private String resolveFileName(Uri uri, String mimeType) {
+    String result = null;
+    if ("content".equals(uri.getScheme())) {
+      try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+        if (cursor != null && cursor.moveToFirst()) {
+          int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+          if (idx >= 0) result = cursor.getString(idx);
+        }
+      } catch (Exception ignored) {
+      }
+    }
+    if (result == null || result.isEmpty()) {
+      result = uri.getLastPathSegment();
+    }
+    if (result == null || result.isEmpty()) {
+      result = "documento";
+    }
+    if (!result.contains(".") && mimeType != null) {
+      if (mimeType.contains("pdf")) result += ".pdf";
+      else if (mimeType.contains("wordprocessingml")) result += ".docx";
+      else if (mimeType.contains("msword")) result += ".doc";
+      else if (mimeType.contains("presentationml")) result += ".pptx";
+      else if (mimeType.contains("ms-powerpoint")) result += ".ppt";
+      else if (mimeType.contains("text/plain")) result += ".txt";
+    }
+    return result;
+  }
+
+  private class AlxNativeBridge {
+    @JavascriptInterface
+    public String consumePendingFile() {
+      String out = pendingFileJson;
+      pendingFileJson = null;
+      return out;
+    }
+  }
+}
+`;
+              fs.writeFileSync(mainActivityPath, javaCode);
+            }
+          '
+
+      - name: Apply ALX Office launcher icon
+        run: |
+          ICON_SRC="public/assets/aistudio/1794773231252_a0df14cb.png"
+          if [ -f "$ICON_SRC" ]; then
+            if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y imagemagick
+            fi
+            CONVERT_BIN=$(command -v magick || command -v convert)
+            rm -rf android/app/src/main/res/mipmap-anydpi-v26
+            for dir in mipmap-mdpi:48 mipmap-hdpi:72 mipmap-xhdpi:96 mipmap-xxhdpi:144 mipmap-xxxhdpi:192; do
+              folder="${dir%%:*}"
+              size="${dir##*:}"
+              mkdir -p "android/app/src/main/res/$folder"
+              "$CONVERT_BIN" "$ICON_SRC" -resize "${size}x${size}" "android/app/src/main/res/$folder/ic_launcher.png"
+              "$CONVERT_BIN" "$ICON_SRC" -resize "${size}x${size}" "android/app/src/main/res/$folder/ic_launcher_round.png"
+            done
+          fi
+
+      - name: Build and sign Android APK
+        id: build_apk
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version || '5.0.0'")
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            TAG="${{ inputs.version }}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ] && [ -n "$GITHUB_REF_NAME" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="v${PKG_VER}"
+          fi
+
+          VERSION_NAME="${TAG#v}"
+          VERSION_CODE=$(node -e '
+            const parts = (process.argv[1] || "5.0.0").split(".").map((n) => parseInt(n, 10) || 0);
+            const [maj = 5, min = 0, pat = 0] = parts;
+            console.log(maj * 10000 + min * 100 + pat);
+          ' "$VERSION_NAME")
+
+          VERSION_CODE="$VERSION_CODE" VERSION_NAME="$VERSION_NAME" node -e '
+            const fs = require("fs");
+            const code = process.env.VERSION_CODE;
+            const name = process.env.VERSION_NAME;
+            for (const file of ["android/app/build.gradle", "android/app/build.gradle.kts"]) {
+              if (!fs.existsSync(file)) continue;
+              let content = fs.readFileSync(file, "utf8");
+              content = content
+                .replace(/versionCode\s*=?\s*\d+/, (m) => m.includes("=") ? `versionCode = ${code}` : `versionCode ${code}`)
+                .replace(/versionName\s*=?\s*["'\''][^"'\'']*["'\'']/, (m) => m.includes("=") ? `versionName = "${name}"` : `versionName "${name}"`);
+              fs.writeFileSync(file, content);
+            }
+          '
+
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+          APK_NAME="ALX-Office-${TAG}.apk"
+          UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          fi
+          SIGNED_APK="../${APK_NAME}"
+
+          ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          BUILD_TOOLS_DIR=$(find "$ANDROID_SDK/build-tools" -maxdepth 1 -mindepth 1 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$BUILD_TOOLS_DIR" ]; then
+            yes | sdkmanager "build-tools;36.0.0" >/dev/null
+            BUILD_TOOLS_DIR="$ANDROID_SDK/build-tools/36.0.0"
+          fi
+
+          "$BUILD_TOOLS_DIR/zipalign" -f -p 4 "$UNSIGNED_APK" app-release-aligned.apk
+
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
+            "$BUILD_TOOLS_DIR/apksigner" sign \
+              --ks release.keystore \
+              --ks-pass "pass:${ANDROID_KEYSTORE_PASS}" \
+              --ks-key-alias "${ANDROID_KEY_ALIAS}" \
+              --key-pass "pass:${ANDROID_KEY_PASS}" \
+              --out "$SIGNED_APK" \
+              app-release-aligned.apk
+          else
+            keytool -genkeypair -v \
+              -keystore debug-release.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=ALX Office,O=ALX,C=ES"
+            "$BUILD_TOOLS_DIR/apksigner" sign \
+              --ks debug-release.keystore \
+              --ks-pass pass:android \
+              --ks-key-alias androiddebugkey \
+              --key-pass pass:android \
+              --out "$SIGNED_APK" \
+              app-release-aligned.apk
+          fi
+
+          echo "apk_name=${APK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build_apk.outputs.apk_name }}
+          path: ${{ steps.build_apk.outputs.apk_name }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build_apk.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ALX Office ${{ steps.build_apk.outputs.tag }}
+          make_latest: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Paquete Android oficial de **ALX Office** (`com.alx.office`).
+            Descarga e instala el archivo `${{ steps.build_apk.outputs.apk_name }}` directamente en tu dispositivo Android.
+          files: ${{ steps.build_apk.outputs.apk_name }}

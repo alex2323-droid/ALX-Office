@@ -16,6 +16,7 @@ import {
   Printer,
   Redo2,
   Search,
+  Shapes,
   Smartphone,
   Sparkles,
   SpellCheck,
@@ -23,7 +24,21 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { WpsComment, WpsDocument, computeDocStats } from '../data/wpsDocuments';
+import {
+  WpsComment,
+  WpsDocument,
+  WpsSlideElement,
+  computeDocStats,
+} from '../data/wpsDocuments';
+import {
+  extractDocCanvaLayers,
+  mergeDocCanvaLayers,
+  stripDocCanvaLayerMarkup,
+} from '../lib/docCanvaLayers';
+import {
+  CanvaDocOverlayStage,
+  CanvaDocStudioDock,
+} from './CanvaDocOverlay';
 import { useDocumentHistory } from '../hooks/useDocumentHistory';
 import {
   createChecklistHtml,
@@ -84,13 +99,34 @@ export default function WpsEditorView({
 
   // Start in clean view mode so tapping/scrolling on mobile never summons the keyboard prematurely
   const [isEditing, setIsEditing] = useState(false);
+  const [canvaMode, setCanvaMode] = useState(false);
+  const [canvaSelectedId, setCanvaSelectedId] = useState<string | null>(null);
+  const [canvaEditingTextId, setCanvaEditingTextId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<ToolDrawerTab>('inicio');
+
+  const initialCanva = useMemo(
+    () => extractDocCanvaLayers(doc.contentHtml),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc.id],
+  );
+  const [canvaLayers, setCanvaLayers] = useState<WpsSlideElement[]>(initialCanva.layers);
+  const canvaLayersRef = useRef<WpsSlideElement[]>(initialCanva.layers);
 
   // View settings
   const [layoutMode, setLayoutMode] = useState<'mobile' | 'page'>('mobile');
   const [eyeCareMode, setEyeCareMode] = useState(false);
-  const [pageBgColor, setPageBgColor] = useState<string>('#FFFFFF');
+  const [pageBgColor, setPageBgColor] = useState<string>(
+    initialCanva.pageBgColor || '#FFFFFF',
+  );
+  const [pageBgGradient, setPageBgGradient] = useState<string | undefined>(
+    initialCanva.pageBgGradient,
+  );
+  const pageBgColorRef = useRef(pageBgColor);
+  const pageBgGradientRef = useRef(pageBgGradient);
+  pageBgColorRef.current = pageBgColor;
+  pageBgGradientRef.current = pageBgGradient;
+
   const [fontFamily, setFontFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
   const [zoomPercent, setZoomPercent] = useState(100);
   const [lineSpacing, setLineSpacing] = useState<'1.4' | '1.65' | '1.95'>('1.65');
@@ -198,22 +234,38 @@ export default function WpsEditorView({
   // Reset UI & sync DOM when switching documents
   useEffect(() => {
     setIsEditing(false);
+    setCanvaMode(false);
+    setCanvaSelectedId(null);
+    setCanvaEditingTextId(null);
     setDrawerOpen(false);
     setIgnoredWords(new Set());
     setSpellMenu(null);
     setSelectedNodeKind(null);
     selectedDomNodeRef.current = null;
     savedRangeRef.current = null;
-    const bgMatch = doc.contentHtml.match(/data-ai-page-bg="([^"]+)"/i);
-    if (bgMatch?.[1]) {
+    const extracted = extractDocCanvaLayers(doc.contentHtml);
+    setCanvaLayers(extracted.layers);
+    canvaLayersRef.current = extracted.layers;
+
+    const bgMatch = extracted.bodyHtml.match(/data-ai-page-bg="([^"]+)"/i);
+    if (extracted.pageBgColor) {
+      setEyeCareMode(false);
+      setPageBgColor(extracted.pageBgColor);
+      pageBgColorRef.current = extracted.pageBgColor;
+    } else if (bgMatch?.[1]) {
       setEyeCareMode(false);
       setPageBgColor(bgMatch[1]);
+      pageBgColorRef.current = bgMatch[1];
     } else {
       setPageBgColor('#FFFFFF');
+      pageBgColorRef.current = '#FFFFFF';
     }
+    setPageBgGradient(extracted.pageBgGradient);
+    pageBgGradientRef.current = extracted.pageBgGradient;
+
     lastAppliedHtmlRef.current = doc.contentHtml;
-    if (editorRef.current && editorRef.current.innerHTML !== doc.contentHtml) {
-      editorRef.current.innerHTML = doc.contentHtml;
+    if (editorRef.current && editorRef.current.innerHTML !== extracted.bodyHtml) {
+      editorRef.current.innerHTML = extracted.bodyHtml;
     }
     const frame = window.requestAnimationFrame(() => {
       runSpellScan();
@@ -229,12 +281,23 @@ export default function WpsEditorView({
     if (!el) return;
     if (
       doc.contentHtml !== lastAppliedHtmlRef.current &&
-      el.innerHTML !== doc.contentHtml &&
-      window.document.activeElement !== el
+      window.document.activeElement !== el &&
+      !isEditing
     ) {
+      const extracted = extractDocCanvaLayers(doc.contentHtml);
       lastAppliedHtmlRef.current = doc.contentHtml;
       savedRangeRef.current = null;
-      el.innerHTML = doc.contentHtml;
+      setCanvaLayers(extracted.layers);
+      canvaLayersRef.current = extracted.layers;
+      if (extracted.pageBgColor) {
+        setPageBgColor(extracted.pageBgColor);
+        pageBgColorRef.current = extracted.pageBgColor;
+      }
+      setPageBgGradient(extracted.pageBgGradient);
+      pageBgGradientRef.current = extracted.pageBgGradient;
+      if (el.innerHTML !== extracted.bodyHtml) {
+        el.innerHTML = extracted.bodyHtml;
+      }
       window.requestAnimationFrame(() => runSpellScan());
     }
   }, [doc.contentHtml, doc.title, history, runSpellScan]);
@@ -321,10 +384,14 @@ export default function WpsEditorView({
         .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
         .forEach(syncCheckboxAttribute);
 
-      const html = editorRef.current.innerHTML;
-      lastAppliedHtmlRef.current = html;
+      const bodyHtml = editorRef.current.innerHTML;
+      const mergedHtml = mergeDocCanvaLayers(bodyHtml, canvaLayersRef.current, {
+        pageBgColor: pageBgColorRef.current,
+        pageBgGradient: pageBgGradientRef.current,
+      });
+      lastAppliedHtmlRef.current = mergedHtml;
       const snapshot: WordHistorySnapshot = {
-        contentHtml: html,
+        contentHtml: mergedHtml,
         title: doc.title,
       };
       if (immediate) {
@@ -333,13 +400,64 @@ export default function WpsEditorView({
         history.recordDebounced(snapshot);
       }
       onUpdateDocument({
-        contentHtml: html,
+        contentHtml: mergedHtml,
         updatedAt: 'Ahora mismo',
       });
       scheduleSpellScan();
-      return html;
+      return mergedHtml;
     },
     [doc.title, history, onUpdateDocument, scheduleSpellScan],
+  );
+
+  const handleChangeCanvaLayers = useCallback(
+    (nextLayers: WpsSlideElement[], immediate: boolean) => {
+      canvaLayersRef.current = nextLayers;
+      setCanvaLayers(nextLayers);
+      const bodyHtml =
+        editorRef.current?.innerHTML ?? extractDocCanvaLayers(doc.contentHtml).bodyHtml;
+      const mergedHtml = mergeDocCanvaLayers(bodyHtml, nextLayers, {
+        pageBgColor: pageBgColorRef.current,
+        pageBgGradient: pageBgGradientRef.current,
+      });
+      lastAppliedHtmlRef.current = mergedHtml;
+      const snapshot: WordHistorySnapshot = {
+        contentHtml: mergedHtml,
+        title: doc.title,
+      };
+      if (immediate) {
+        history.pushImmediate(snapshot);
+      } else {
+        history.recordDebounced(snapshot);
+      }
+      onUpdateDocument({
+        contentHtml: mergedHtml,
+        updatedAt: 'Ahora mismo',
+      });
+    },
+    [doc.contentHtml, doc.title, history, onUpdateDocument],
+  );
+
+  const handleChangeCanvaBackground = useCallback(
+    (nextColor: string, nextGradient?: string) => {
+      setEyeCareMode(false);
+      setPageBgColor(nextColor);
+      setPageBgGradient(nextGradient);
+      pageBgColorRef.current = nextColor;
+      pageBgGradientRef.current = nextGradient;
+      const bodyHtml =
+        editorRef.current?.innerHTML ?? extractDocCanvaLayers(doc.contentHtml).bodyHtml;
+      const mergedHtml = mergeDocCanvaLayers(bodyHtml, canvaLayersRef.current, {
+        pageBgColor: nextColor,
+        pageBgGradient: nextGradient,
+      });
+      lastAppliedHtmlRef.current = mergedHtml;
+      history.pushImmediate({ contentHtml: mergedHtml, title: doc.title });
+      onUpdateDocument({
+        contentHtml: mergedHtml,
+        updatedAt: 'Ahora mismo',
+      });
+    },
+    [doc.contentHtml, doc.title, history, onUpdateDocument],
   );
 
   const applyHistorySnapshot = useCallback(
@@ -347,9 +465,18 @@ export default function WpsEditorView({
       if (!snapshot) return;
       setSpellMenu(null);
       savedRangeRef.current = null;
+      const extracted = extractDocCanvaLayers(snapshot.contentHtml);
       lastAppliedHtmlRef.current = snapshot.contentHtml;
-      if (editorRef.current && editorRef.current.innerHTML !== snapshot.contentHtml) {
-        editorRef.current.innerHTML = snapshot.contentHtml;
+      canvaLayersRef.current = extracted.layers;
+      setCanvaLayers(extracted.layers);
+      const nextBg = extracted.pageBgColor || '#FFFFFF';
+      setPageBgColor(nextBg);
+      pageBgColorRef.current = nextBg;
+      setPageBgGradient(extracted.pageBgGradient);
+      pageBgGradientRef.current = extracted.pageBgGradient;
+
+      if (editorRef.current && editorRef.current.innerHTML !== extracted.bodyHtml) {
+        editorRef.current.innerHTML = extracted.bodyHtml;
       }
       onUpdateDocument({
         contentHtml: snapshot.contentHtml,
@@ -463,18 +590,21 @@ export default function WpsEditorView({
     const el = editorRef.current;
     if (!el) return;
     if (!isEditing) setIsEditing(true);
+    if (canvaMode) setCanvaMode(false);
 
     if (designPatch?.pageBgColor) {
       setEyeCareMode(false);
       setPageBgColor(designPatch.pageBgColor);
+      pageBgColorRef.current = designPatch.pageBgColor;
     }
     if (designPatch?.fontFamily) {
       setFontFamily(designPatch.fontFamily);
     }
 
     if (placement === 'replace-all') {
+      const cleanBody = stripDocCanvaLayerMarkup(html);
       window.requestAnimationFrame(() => {
-        el.innerHTML = html;
+        el.innerHTML = cleanBody;
         savedRangeRef.current = null;
         persistEditorHtml(true);
         syncFormatState();
@@ -980,8 +1110,14 @@ export default function WpsEditorView({
               value={doc.title}
               onChange={(e) => {
                 const nextTitle = e.target.value;
+                const currentMerged = editorRef.current
+                  ? mergeDocCanvaLayers(editorRef.current.innerHTML, canvaLayersRef.current, {
+                      pageBgColor: pageBgColorRef.current,
+                      pageBgGradient: pageBgGradientRef.current,
+                    })
+                  : doc.contentHtml;
                 history.recordDebounced({
-                  contentHtml: editorRef.current?.innerHTML ?? doc.contentHtml,
+                  contentHtml: currentMerged,
                   title: nextTitle,
                 });
                 onUpdateDocument({ title: nextTitle, updatedAt: 'Ahora mismo' });
@@ -1111,12 +1247,44 @@ export default function WpsEditorView({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
+                const nextCanva = !canvaMode;
+                if (nextCanva) {
+                  if (isEditing) persistEditorHtml(true);
+                  setIsEditing(false);
+                  setDrawerOpen(false);
+                  setSpellMenu(null);
+                  hideSoftKeyboard();
+                } else {
+                  setCanvaSelectedId(null);
+                  setCanvaEditingTextId(null);
+                }
+                setCanvaMode(nextCanva);
+              }}
+              aria-label="Estudio Canva para documento"
+              title="Estudio Canva (formas, capas, imágenes, gráficos)"
+              className={`inline-flex min-h-[40px] items-center gap-1 rounded-xl px-2.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                canvaMode
+                  ? 'bg-[#7C3AED] text-white shadow-2xs'
+                  : 'border border-slate-200 bg-white text-[#7C3AED] hover:bg-violet-50 dark:border-slate-700 dark:bg-slate-800 dark:text-violet-300'
+              }`}
+            >
+              <Shapes className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Canva</span>
+            </button>
+
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
                 if (isEditing) {
                   persistEditorHtml(true);
                   history.commitPending();
                   hideSoftKeyboard();
                   setDrawerOpen(false);
                 }
+                setCanvaMode(false);
+                setCanvaSelectedId(null);
+                setCanvaEditingTextId(null);
                 setSpellMenu(null);
                 setIsEditing((v) => !v);
               }}
@@ -1212,17 +1380,18 @@ export default function WpsEditorView({
               fontFamily: fontStack,
               fontSize: printViewMode ? '11pt' : `${(16 * zoomPercent) / 100}px`,
               lineHeight: printViewMode ? '1.6' : lineSpacing,
-              ...(pageBgColor !== '#FFFFFF' && !eyeCareMode && !printViewMode
+              ...(!eyeCareMode && !printViewMode && (pageBgGradient || pageBgColor !== '#FFFFFF')
                 ? {
                     backgroundColor: pageBgColor,
-                    color: pageBgColor === '#0F2744' ? '#F8FAFC' : '#0F172A',
+                    backgroundImage: pageBgGradient || undefined,
+                    color: pageBgColor === '#0F2744' || pageBgColor === '#0F172A' ? '#F8FAFC' : '#0F172A',
                   }
                 : {}),
             }}
             className={`wps-print-paper relative min-h-[68vh] overflow-x-auto rounded-2xl border p-5 shadow-sm sm:p-10 ${
               eyeCareMode && !printViewMode
                 ? 'border-[#E6D8B8] bg-[#FBF5E6] text-[#3B2F21]'
-                : pageBgColor !== '#FFFFFF' && !printViewMode
+                : (pageBgGradient || pageBgColor !== '#FFFFFF') && !printViewMode
                   ? 'border-slate-300/80 dark:border-slate-700'
                   : 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100'
             }`}
@@ -1250,7 +1419,7 @@ export default function WpsEditorView({
 
             <div
               ref={editorRef}
-              contentEditable={isEditing && !printViewMode}
+              contentEditable={isEditing && !canvaMode && !printViewMode}
               spellCheck={false}
               suppressContentEditableWarning
               onInput={() => persistEditorHtml(false)}
@@ -1261,6 +1430,17 @@ export default function WpsEditorView({
               onContextMenu={handleEditorContextMenu}
               onClick={handleEditorClick}
               className="wps-doc-canvas relative z-[1] min-h-[58vh]"
+            />
+
+            {/* Floating Interactive Canva Stage Overlay (shapes, images, charts, text cards, stickers) */}
+            <CanvaDocOverlayStage
+              layers={canvaLayers}
+              active={canvaMode && !printViewMode}
+              selectedId={canvaSelectedId}
+              editingTextId={canvaEditingTextId}
+              onSelect={setCanvaSelectedId}
+              onSetEditingTextId={setCanvaEditingTextId}
+              onChangeLayers={handleChangeCanvaLayers}
             />
           </div>
 
@@ -1428,7 +1608,21 @@ export default function WpsEditorView({
         </div>
       )}
 
-      {!printViewMode && (
+      {!printViewMode && canvaMode && (
+        <CanvaDocStudioDock
+          layers={canvaLayers}
+          selectedId={canvaSelectedId}
+          editingTextId={canvaEditingTextId}
+          pageBgColor={pageBgColor}
+          pageBgGradient={pageBgGradient}
+          onSelect={setCanvaSelectedId}
+          onSetEditingTextId={setCanvaEditingTextId}
+          onChangeLayers={handleChangeCanvaLayers}
+          onChangePageBackground={handleChangeCanvaBackground}
+        />
+      )}
+
+      {!printViewMode && !canvaMode && (
         <WpsWordEditingBar
           drawerOpen={drawerOpen}
           onDrawerOpenChange={setDrawerOpen}
@@ -1442,10 +1636,7 @@ export default function WpsEditorView({
           hasCopiedStyle={Boolean(copiedDocStyle)}
           onApplyCopiedStyle={handleApplyCopiedDocStyle}
           pageBgColor={pageBgColor}
-          onChangePageBgColor={(color) => {
-            setEyeCareMode(false);
-            setPageBgColor(color);
-          }}
+          onChangePageBgColor={(color) => handleChangeCanvaBackground(color, undefined)}
           spellCheckEnabled={spellCheckEnabled}
           onToggleSpellCheck={() => setSpellCheckEnabled((v) => !v)}
           spellErrorCount={spellErrors.length}

@@ -4,16 +4,25 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  HelpCircle,
+  Image as ImageIcon,
   Loader2,
+  MessageSquareText,
   Presentation,
   RefreshCw,
+  Search,
   Sparkles,
+  Users,
+  Wand2,
   X,
 } from 'lucide-react';
 import type { WpsDocument } from '../data/wpsDocuments';
 import {
   AiCreateDocumentResponse,
+  SlideImageMode,
+  SlideQuestionOption,
   requestAiCreateDocument,
+  requestAiSlideQuestions,
 } from '../lib/aiEditorClient';
 import { buildWpsSlideFromAiProposal } from '../lib/aiSlideBuilder';
 import { buildPdfBytesFromPageHtmls } from '../lib/pdfEditor';
@@ -89,6 +98,16 @@ const PROMPT_SUGGESTIONS: Record<'DOCX' | 'PPTX' | 'PDF', string[]> = {
   ],
 };
 
+const PPTX_IMAGE_MODES: {
+  id: SlideImageMode;
+  label: string;
+  hint: string;
+}[] = [
+  { id: 'none', label: 'Sin imágenes', hint: 'Solo formas, tarjetas y gráficos' },
+  { id: 'search', label: 'Buscar imágenes del tema', hint: 'IA busca fotos reales del tema' },
+  { id: 'generate', label: 'Generar ilustraciones IA', hint: 'IA diseña ilustraciones temáticas' },
+];
+
 function getFontStackCss(fontFamily?: 'sans' | 'serif' | 'mono'): string {
   if (fontFamily === 'serif') return 'var(--font-serif)';
   if (fontFamily === 'mono') return 'var(--font-mono)';
@@ -109,6 +128,14 @@ export default function AiCreateDocumentModal({
   const [fontStyle, setFontStyle] = useState('auto');
   const [sectionCount, setSectionCount] = useState(4);
 
+  // PPTX opt-in image mode & interactive questions mode
+  const [imageMode, setImageMode] = useState<SlideImageMode>('none');
+  const [pptxWorkMode, setPptxWorkMode] = useState<'auto' | 'questions'>('auto');
+  const [questionsLoading, setQuestionsLoading] = useState(false);
+  const [questionsIntro, setQuestionsIntro] = useState('');
+  const [questions, setQuestions] = useState<SlideQuestionOption[]>([]);
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+
   const [loading, setLoading] = useState(false);
   const [compilingPdf, setCompilingPdf] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -119,6 +146,12 @@ export default function AiCreateDocumentModal({
   useEffect(() => {
     if (!open) return;
     setFormat(initialFormat);
+    setImageMode('none');
+    setPptxWorkMode('auto');
+    setQuestionsLoading(false);
+    setQuestionsIntro('');
+    setQuestions([]);
+    setQuestionAnswers({});
     setLoading(false);
     setCompilingPdf(false);
     setErrorMsg(null);
@@ -136,9 +169,47 @@ export default function AiCreateDocumentModal({
 
   if (!open) return null;
 
+  const handleFetchPptxQuestions = async () => {
+    if (questionsLoading || loading) return;
+    setQuestionsLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await requestAiSlideQuestions({
+        purpose: 'create-pptx',
+        presentationTitle: title.trim() || prompt.trim() || 'Nueva presentación',
+        initialPrompt: prompt.trim() || undefined,
+      });
+      setQuestionsIntro(res.intro);
+      setQuestions(res.questions);
+      const defaults: Record<string, string> = {};
+      res.questions.forEach((q) => {
+        if (q.options[0]) defaults[q.id] = q.options[0];
+      });
+      setQuestionAnswers(defaults);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : 'No se pudieron generar preguntas para la presentación.',
+      );
+    } finally {
+      setQuestionsLoading(false);
+    }
+  };
+
   const handleGenerate = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!prompt.trim() || loading) return;
+
+    const collectedQa =
+      format === 'PPTX'
+        ? questions
+            .map((q) => ({
+              question: q.question,
+              answer: (questionAnswers[q.id] || '').trim(),
+            }))
+            .filter((a) => a.answer.length > 0)
+        : [];
 
     setLoading(true);
     setErrorMsg(null);
@@ -155,6 +226,9 @@ export default function AiCreateDocumentModal({
         palette,
         fontStyle,
         sectionCount,
+        preferredModel: 'auto',
+        imageMode: format === 'PPTX' ? imageMode : 'none',
+        qaAnswers: collectedQa.length > 0 ? collectedQa : undefined,
       });
       setResult(generated);
     } catch (err) {
@@ -184,7 +258,7 @@ export default function AiCreateDocumentModal({
                 {
                   title: result.title,
                   layoutType: 'bullets',
-                  bullets: ['Diapositiva generada con IA'],
+                  bullets: [result.summary || result.title || 'Resumen ejecutivo'],
                   notes: '',
                   summary: result.summary,
                 },
@@ -211,10 +285,18 @@ export default function AiCreateDocumentModal({
     if (result.format === 'PDF') {
       setCompilingPdf(true);
       try {
+        const safeTitleHtml = result.title
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        const safeSummaryHtml = (result.summary || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
         const pagesHtml =
           result.pagesHtml && result.pagesHtml.length > 0
             ? result.pagesHtml
-            : [`<h1>${result.title}</h1><p>${result.summary}</p>`];
+            : [`<h1>${safeTitleHtml}</h1><p>${safeSummaryHtml}</p>`];
         const bytes = await buildPdfBytesFromPageHtmls(result.title, pagesHtml);
         const base64 = uint8ToBase64(bytes);
         onCreateDocument({
@@ -350,6 +432,176 @@ export default function AiCreateDocumentModal({
             </div>
           </div>
 
+          {/* Unified AI Collaborative Team Banner (Manual model list hidden) */}
+          <div className="flex items-center justify-between gap-2.5 rounded-2xl border border-violet-200/80 bg-violet-50/60 px-3.5 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/30">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
+                <Users className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                  Trabajo en Equipo IA Automático
+                </div>
+                <p className="truncate text-[10px] text-slate-600 dark:text-slate-400">
+                  Las IA gratuitas colaboran automáticamente según contenido, diseño e imágenes
+                </p>
+              </div>
+            </div>
+            <span className="shrink-0 rounded-lg bg-white/90 px-2 py-1 text-[10px] font-semibold text-violet-700 shadow-2xs dark:bg-slate-900 dark:text-violet-300">
+              Equipo activo
+            </span>
+          </div>
+
+          {/* PPTX-only Controls: Work Mode (Auto vs Questions) & Opt-in Images */}
+          {format === 'PPTX' && (
+            <div className="space-y-3 rounded-2xl border border-slate-200/90 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+              <div>
+                <div className="mb-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                  Modo de creación de la presentación
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setPptxWorkMode('auto')}
+                    className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-all ${
+                      pptxWorkMode === 'auto'
+                        ? 'border-violet-600 bg-white text-violet-700 shadow-2xs ring-1 ring-violet-600 dark:border-violet-400 dark:bg-slate-800 dark:text-violet-300'
+                        : 'border-slate-200 bg-white/60 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300'
+                    }`}
+                  >
+                    <Wand2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>Modo automático</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setPptxWorkMode('questions');
+                      if (questions.length === 0 && !questionsLoading) {
+                        void handleFetchPptxQuestions();
+                      }
+                    }}
+                    className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-all ${
+                      pptxWorkMode === 'questions'
+                        ? 'border-violet-600 bg-white text-violet-700 shadow-2xs ring-1 ring-violet-600 dark:border-violet-400 dark:bg-slate-800 dark:text-violet-300'
+                        : 'border-slate-200 bg-white/60 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300'
+                    }`}
+                  >
+                    <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>IA me hace preguntas</span>
+                  </button>
+                </div>
+              </div>
+
+              {pptxWorkMode === 'questions' && (
+                <div className="space-y-2.5 rounded-xl border border-violet-200 bg-white p-3 dark:border-violet-900/50 dark:bg-slate-900">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
+                      <MessageSquareText className="h-4 w-4" />
+                      <span>{questionsIntro || 'Personaliza tu presentación antes de crearla'}</span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={questionsLoading || loading}
+                      onClick={() => void handleFetchPptxQuestions()}
+                      className="inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${questionsLoading ? 'animate-spin' : ''}`} />
+                      <span>Actualizar</span>
+                    </button>
+                  </div>
+
+                  {questionsLoading ? (
+                    <div className="flex items-center gap-2 py-2 text-xs text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin text-violet-600" />
+                      <span>Preparando preguntas sobre tu presentación...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {questions.map((q) => {
+                        const ans = questionAnswers[q.id] || '';
+                        return (
+                          <div
+                            key={q.id}
+                            className="space-y-1.5 rounded-xl border border-slate-200/80 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-950/60"
+                          >
+                            <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                              {q.question}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {q.options.map((opt) => (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  disabled={loading}
+                                  onClick={() =>
+                                    setQuestionAnswers((prev) => ({ ...prev, [q.id]: opt }))
+                                  }
+                                  className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
+                                    ans === opt
+                                      ? 'border-violet-600 bg-violet-600 text-white'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Opt-in Topic Images for PPTX */}
+              <div>
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                  <ImageIcon className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+                  <span>¿Deseas agregar imágenes relacionadas al tema en las diapositivas?</span>
+                </div>
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+                  {PPTX_IMAGE_MODES.map((opt) => {
+                    const active = imageMode === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        disabled={loading}
+                        onClick={() => setImageMode(opt.id)}
+                        className={`flex min-h-[42px] items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left transition-all ${
+                          active
+                            ? 'border-violet-600 bg-white ring-1 ring-violet-600 dark:border-violet-400 dark:bg-slate-800'
+                            : 'border-slate-200 bg-white/60 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900/60'
+                        }`}
+                      >
+                        <div className="shrink-0 text-violet-600 dark:text-violet-400">
+                          {opt.id === 'search' ? (
+                            <Search className="h-3.5 w-3.5" />
+                          ) : opt.id === 'generate' ? (
+                            <Sparkles className="h-3.5 w-3.5" />
+                          ) : (
+                            <X className="h-3.5 w-3.5 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-[11px] font-semibold text-slate-900 dark:text-slate-100">
+                            {opt.label}
+                          </div>
+                          <div className="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                            {opt.hint}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Prompt & Design Form */}
           <form onSubmit={(e) => void handleGenerate(e)} className="space-y-3">
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
@@ -387,7 +639,12 @@ export default function AiCreateDocumentModal({
                   onChange={(e) => setSectionCount(Number(e.target.value))}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:border-violet-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 >
-                  {(format === 'PDF' ? [2, 3, 4] : [3, 4, 5, 6]).map((n) => (
+                  {(format === 'PDF'
+                    ? [2, 3, 4, 5, 6, 8, 10, 12]
+                    : format === 'PPTX'
+                      ? [3, 4, 5, 6, 8, 10, 12, 15, 20]
+                      : [3, 4, 5, 6, 8, 10, 12, 15]
+                  ).map((n) => (
                     <option key={n} value={n}>
                       {n}{' '}
                       {format === 'PPTX'
@@ -532,8 +789,27 @@ export default function AiCreateDocumentModal({
             <div className="space-y-3 rounded-2xl border border-violet-200 bg-slate-50 p-3.5 dark:border-violet-900/50 dark:bg-slate-950">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate font-display text-sm font-bold text-slate-900 dark:text-slate-100">
-                    {result.title}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-display text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {result.title}
+                    </span>
+                    {(result.teamRole || result.modelUsed) && (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          result.modelUsed?.includes('gemini')
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300'
+                            : result.modelUsed?.includes('gemma-4')
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                              : result.modelUsed?.includes('nemotron') ||
+                                  result.modelUsed?.includes('ernie') ||
+                                  result.modelUsed?.includes(':free')
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                                : 'bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300'
+                        }`}
+                      >
+                        ⚡ {result.teamRole || result.modelUsed}
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-violet-700 dark:text-violet-300">
                     {result.summary}

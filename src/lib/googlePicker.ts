@@ -1,3 +1,5 @@
+import { stripDocCanvaLayerMarkup } from './docCanvaLayers';
+
 export interface PickedDriveFile {
   id: string;
   name: string;
@@ -213,7 +215,8 @@ export async function uploadDocumentCopyToDrive(
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-  const wordDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${safeHtmlTitle}</title></head><body>${contentHtml}</body></html>`;
+  const cleanHtml = stripDocCanvaLayerMarkup(contentHtml);
+  const wordDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${safeHtmlTitle}</title></head><body>${cleanHtml}</body></html>`;
 
   const metadata = {
     name: fileName,

@@ -98,13 +98,53 @@ async function writeToCacheApi(docs: WpsDocument[]): Promise<void> {
   }
 }
 
+const SAMPLES_PURGED_KEY = 'alx_legacy_samples_purged_v1';
+
+const LEGACY_SAMPLE_TIMESTAMPS = new Map<string, string>([
+  ['doc-1', 'Hoy, 12:40'],
+  ['doc-pdf-1', 'Hoy, 11:50'],
+  ['doc-pptx-1', 'Hoy, 10:15'],
+  ['doc-ppt-1', 'Ayer, 19:30'],
+  ['doc-3', '10 nov 2026'],
+  ['doc-2', 'Ayer, 17:05'],
+  ['doc-4', '06 nov 2026'],
+]);
+
+function stripUntouchedLegacySamples(docs: WpsDocument[]): {
+  docs: WpsDocument[];
+  removedAny: boolean;
+} {
+  try {
+    if (localStorage.getItem(SAMPLES_PURGED_KEY) === '1') {
+      return { docs, removedAny: false };
+    }
+  } catch {
+    // Ignore storage restriction
+  }
+
+  const filtered = docs.filter((d) => {
+    const sampleStamp = LEGACY_SAMPLE_TIMESTAMPS.get(d.id);
+    if (!sampleStamp) return true;
+    return d.updatedAt !== sampleStamp;
+  });
+
+  try {
+    localStorage.setItem(SAMPLES_PURGED_KEY, '1');
+  } catch {
+    // Ignore storage restriction
+  }
+
+  return { docs: filtered, removedAny: filtered.length !== docs.length };
+}
+
 export function loadInitialDocumentsSync(fallback: WpsDocument[]): WpsDocument[] {
   try {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed as WpsDocument[];
+      if (Array.isArray(parsed)) {
+        const { docs } = stripUntouchedLegacySamples(parsed as WpsDocument[]);
+        return docs;
       }
     }
   } catch {
@@ -115,13 +155,21 @@ export function loadInitialDocumentsSync(fallback: WpsDocument[]): WpsDocument[]
 
 export async function loadCachedDocuments(): Promise<WpsDocument[] | null> {
   const fromIdb = await readFromIndexedDb();
-  if (fromIdb && fromIdb.length > 0) {
-    return fromIdb;
+  if (fromIdb !== null) {
+    const { docs, removedAny } = stripUntouchedLegacySamples(fromIdb);
+    if (removedAny) {
+      await saveCachedDocuments(docs);
+    }
+    return docs;
   }
 
   const fromCache = await readFromCacheApi();
-  if (fromCache && fromCache.length > 0) {
-    return fromCache;
+  if (fromCache !== null) {
+    const { docs, removedAny } = stripUntouchedLegacySamples(fromCache);
+    if (removedAny) {
+      await saveCachedDocuments(docs);
+    }
+    return docs;
   }
 
   return null;

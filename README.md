@@ -35,14 +35,15 @@ Al subir el repositorio de **`alex2323-droid`** en GitHub (reemplazando `ALX-Off
 
 ## Paquete y Releases en GitHub
 
-- **Nombre del paquete (`package.json`):** `alx-office` (`v2.0.0`)
+- **Nombre del paquete (`package.json`):** `alx-office` (`v5.0.0`)
 - **ID del paquete Android (`applicationId` en `capacitor.config.json`):** `com.alx.office`
-- **Archivo APK de Release generado:** `ALX-Office-v2.0.0.apk`
+- **Archivo APK de Release generado:** `ALX-Office-v5.0.0.apk`
+- **Equipo de IA gratuito integrado:** Gemini 4 Flash, **Gemma 4** (`gemma-4-e4b-it`, `gemma-4-e2b-it`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it`), OpenRouter `:free` (`Nemotron 550B`, `Nemotron Lightning`, `Nemotron Super VL`, `ERNIE 5.5 Flash`) y Groq (`GPT-120B`, `Qwen-27B`, `GPT-20B`, `Whisper V3 Turbo`).
 - **Página de Releases:** `https://github.com/alex2323-droid/ALX-Office/releases/latest`
 - **Enlace directo de descarga del APK:**  
-  `https://github.com/alex2323-droid/ALX-Office/releases/download/v2.0.0/ALX-Office-v2.0.0.apk`
+  `https://github.com/alex2323-droid/ALX-Office/releases/download/v5.0.0/ALX-Office-v5.0.0.apk`
 
-El flujo automático [`.github/workflows/release-apk.yml`](.github/workflows/release-apk.yml) se ejecuta **automáticamente en cada push a `main` / `master`** (además de tags `v*` o ejecución manual desde **Actions**), compila el APK firmado y lo publica directamente en la sección **Releases** de GitHub.
+El flujo para generar la APK está disponible en [`ci/release-apk.yml`](ci/release-apk.yml). Una vez que subas el repositorio a GitHub, puedes activarlo moviendo este archivo a `.github/workflows/release-apk.yml` para compilar automáticamente el APK firmado (`v5.0.0`) y publicarlo en **Releases**.
 
 ## Desarrollo y compilación
 

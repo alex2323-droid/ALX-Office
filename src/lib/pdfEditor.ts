@@ -6,6 +6,8 @@ export interface PdfTextAnnotation {
   pageNumber: number;
   xPct: number;
   yPct: number;
+  wPct?: number;
+  hPct?: number;
   text: string;
   fontSize: number;
   color: string;
@@ -15,6 +17,9 @@ export interface PdfTextAnnotation {
   opacity?: number;
   rotationDeg?: number;
   bgFill?: string;
+  locked?: boolean;
+  flippedX?: boolean;
+  flippedY?: boolean;
   zIndex?: number;
 }
 
@@ -26,12 +31,23 @@ export interface PdfDrawAnnotation {
   color: string;
   strokeWidth: number;
   opacity?: number;
+  locked?: boolean;
   zIndex?: number;
 }
 
 export interface PdfRectAnnotation {
   id: string;
-  kind: 'highlight' | 'redact' | 'box' | 'circle' | 'arrow' | 'line';
+  kind:
+    | 'highlight'
+    | 'redact'
+    | 'box'
+    | 'circle'
+    | 'arrow'
+    | 'line'
+    | 'triangle'
+    | 'star'
+    | 'diamond'
+    | 'badge';
   pageNumber: number;
   xPct: number;
   yPct: number;
@@ -42,6 +58,10 @@ export interface PdfRectAnnotation {
   strokeWidth?: number;
   opacity?: number;
   rotationDeg?: number;
+  borderRadiusPx?: number;
+  locked?: boolean;
+  flippedX?: boolean;
+  flippedY?: boolean;
   zIndex?: number;
 }
 
@@ -56,6 +76,10 @@ export interface PdfImageAnnotation {
   src: string;
   opacity?: number;
   rotationDeg?: number;
+  borderRadiusPx?: number;
+  locked?: boolean;
+  flippedX?: boolean;
+  flippedY?: boolean;
   zIndex?: number;
 }
 
@@ -149,14 +173,11 @@ function getPageGeometry(page: PDFPage): PageGeometry {
   };
 }
 
-function visualPctToPdfPoint(
+function visualUvToPdfPoint(
   geom: PageGeometry,
-  xPct: number,
-  yPct: number,
+  u: number,
+  v: number,
 ): { x: number; y: number } {
-  const u = Math.max(0, Math.min(1, xPct)) * geom.visualW;
-  const v = Math.max(0, Math.min(1, yPct)) * geom.visualH;
-
   switch (geom.rot) {
     case 90:
       return { x: geom.cropX + v, y: geom.cropY + u };
@@ -178,6 +199,16 @@ function visualPctToPdfPoint(
   }
 }
 
+function visualPctToPdfPoint(
+  geom: PageGeometry,
+  xPct: number,
+  yPct: number,
+): { x: number; y: number } {
+  const u = Math.max(0, Math.min(1, xPct)) * geom.visualW;
+  const v = Math.max(0, Math.min(1, yPct)) * geom.visualH;
+  return visualUvToPdfPoint(geom, u, v);
+}
+
 function visualRectToPdfBounds(
   geom: PageGeometry,
   xPct: number,
@@ -192,6 +223,50 @@ function visualRectToPdfBounds(
     y: Math.min(p1.y, p2.y),
     width: Math.abs(p2.x - p1.x),
     height: Math.abs(p2.y - p1.y),
+  };
+}
+
+/**
+ * Computes exact pdf-lib (x, y, rotateDeg) for a rectangle/image rotated CSS-clockwise
+ * by `cssRotDeg` around its geometric center, matching on-screen transformOrigin: center.
+ */
+function centeredPdfRectTransform(
+  centerX: number,
+  centerY: number,
+  width: number,
+  height: number,
+  pageRotDeg: number,
+  cssRotDeg = 0,
+): { x: number; y: number; rotateDeg: number } {
+  const pdfThetaDeg = pageRotDeg - cssRotDeg;
+  const rad = (pdfThetaDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const halfW = width / 2;
+  const halfH = height / 2;
+  return {
+    x: centerX - (halfW * cos - halfH * sin),
+    y: centerY - (halfW * sin + halfH * cos),
+    rotateDeg: pdfThetaDeg,
+  };
+}
+
+function rotateVisualPoint(
+  cx: number,
+  cy: number,
+  px: number,
+  py: number,
+  cssRotDeg = 0,
+): { u: number; v: number } {
+  if (!cssRotDeg) return { u: px, v: py };
+  const rad = (cssRotDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = px - cx;
+  const dy = py - cy;
+  return {
+    u: cx + (dx * cos - dy * sin),
+    v: cy + (dx * sin + dy * cos),
   };
 }
 
@@ -226,41 +301,63 @@ export async function applyPdfEdits(
       ann.kind === 'box' ||
       ann.kind === 'circle' ||
       ann.kind === 'arrow' ||
-      ann.kind === 'line'
+      ann.kind === 'line' ||
+      ann.kind === 'triangle' ||
+      ann.kind === 'star' ||
+      ann.kind === 'diamond' ||
+      ann.kind === 'badge'
     ) {
-      const bounds = visualRectToPdfBounds(
-        geom,
-        ann.xPct,
-        ann.yPct,
-        ann.wPct,
-        ann.hPct,
-      );
-      if (bounds.width <= 0 && bounds.height <= 0) continue;
+      const boxW = Math.max(0, ann.wPct) * geom.visualW;
+      const boxH = Math.max(0, ann.hPct) * geom.visualH;
+      if (boxW <= 0 && boxH <= 0) continue;
+
+      const cxU = (ann.xPct + ann.wPct / 2) * geom.visualW;
+      const cyV = (ann.yPct + ann.hPct / 2) * geom.visualH;
+      const pdfCenter = visualUvToPdfPoint(geom, cxU, cyV);
+      const cssRot = ann.rotationDeg ?? 0;
 
       if (ann.kind === 'highlight') {
+        const tr = centeredPdfRectTransform(
+          pdfCenter.x,
+          pdfCenter.y,
+          boxW,
+          boxH,
+          geom.rot,
+          cssRot,
+        );
         page.drawRectangle({
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
+          x: tr.x,
+          y: tr.y,
+          width: boxW,
+          height: boxH,
           color: parseHexRgb(ann.color),
           opacity: Math.min(0.95, 0.34 * opacity),
+          rotate: degrees(tr.rotateDeg),
         });
       } else if (ann.kind === 'redact') {
+        const tr = centeredPdfRectTransform(
+          pdfCenter.x,
+          pdfCenter.y,
+          boxW,
+          boxH,
+          geom.rot,
+          cssRot,
+        );
         page.drawRectangle({
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
+          x: tr.x,
+          y: tr.y,
+          width: boxW,
+          height: boxH,
           color: parseHexRgb(ann.color || '#FFFFFF'),
           opacity,
+          rotate: degrees(tr.rotateDeg),
         });
       } else if (ann.kind === 'circle') {
         page.drawEllipse({
-          x: bounds.x + bounds.width / 2,
-          y: bounds.y + bounds.height / 2,
-          xScale: Math.max(2, bounds.width / 2),
-          yScale: Math.max(2, bounds.height / 2),
+          x: pdfCenter.x,
+          y: pdfCenter.y,
+          xScale: Math.max(2, boxW / 2),
+          yScale: Math.max(2, boxH / 2),
           borderColor: parseHexRgb(ann.color),
           borderWidth: ann.strokeWidth ?? 1.8,
           ...(ann.fillColor && ann.fillColor !== 'transparent'
@@ -268,10 +365,26 @@ export async function applyPdfEdits(
             : {}),
           opacity,
           borderOpacity: opacity,
+          rotate: degrees(geom.rot - cssRot),
         });
       } else if (ann.kind === 'line' || ann.kind === 'arrow') {
-        const startPt = visualPctToPdfPoint(geom, ann.xPct, ann.yPct + ann.hPct / 2);
-        const endPt = visualPctToPdfPoint(geom, ann.xPct + ann.wPct, ann.yPct + ann.hPct / 2);
+        const flipFactor = ann.flippedX ? -1 : 1;
+        const leftUv = rotateVisualPoint(
+          cxU,
+          cyV,
+          cxU - (boxW / 2) * flipFactor,
+          cyV,
+          cssRot,
+        );
+        const rightUv = rotateVisualPoint(
+          cxU,
+          cyV,
+          cxU + (boxW / 2) * flipFactor,
+          cyV,
+          cssRot,
+        );
+        const startPt = visualUvToPdfPoint(geom, leftUv.u, leftUv.v);
+        const endPt = visualUvToPdfPoint(geom, rightUv.u, rightUv.v);
         const thickness = ann.strokeWidth ?? 2;
         const lineColor = parseHexRgb(ann.color);
         page.drawLine({
@@ -305,12 +418,92 @@ export async function applyPdfEdits(
             opacity,
           });
         }
+      } else if (
+        ann.kind === 'triangle' ||
+        ann.kind === 'star' ||
+        ann.kind === 'diamond'
+      ) {
+        const normPts: [number, number][] =
+          ann.kind === 'triangle'
+            ? [
+                [0.5, 0.04],
+                [0.96, 0.94],
+                [0.04, 0.94],
+              ]
+            : ann.kind === 'diamond'
+              ? [
+                  [0.5, 0.04],
+                  [0.96, 0.5],
+                  [0.5, 0.96],
+                  [0.04, 0.5],
+                ]
+              : [
+                  [0.5, 0.04],
+                  [0.63, 0.34],
+                  [0.96, 0.38],
+                  [0.71, 0.6],
+                  [0.78, 0.94],
+                  [0.5, 0.76],
+                  [0.22, 0.94],
+                  [0.29, 0.6],
+                  [0.04, 0.38],
+                  [0.37, 0.34],
+                ];
+
+        const u0 = ann.xPct * geom.visualW;
+        const v0 = ann.yPct * geom.visualH;
+        const ptsUv = normPts.map(([nx, ny]) => {
+          const fx = ann.flippedX ? 1 - nx : nx;
+          const fy = ann.flippedY ? 1 - ny : ny;
+          return rotateVisualPoint(cxU, cyV, u0 + fx * boxW, v0 + fy * boxH, cssRot);
+        });
+
+        if (geom.rot === 0) {
+          const svgD =
+            ptsUv
+              .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.u.toFixed(2)} ${p.v.toFixed(2)}`)
+              .join(' ') + ' Z';
+          page.drawSvgPath(svgD, {
+            x: geom.cropX,
+            y: geom.cropY + geom.cropH,
+            borderColor: parseHexRgb(ann.color),
+            borderWidth: ann.strokeWidth ?? 1.75,
+            ...(ann.fillColor && ann.fillColor !== 'transparent'
+              ? { color: parseHexRgb(ann.fillColor) }
+              : {}),
+            opacity,
+            borderOpacity: opacity,
+          });
+        } else {
+          const pdfPts = ptsUv.map((p) => visualUvToPdfPoint(geom, p.u, p.v));
+          const strokeCol = parseHexRgb(ann.color);
+          for (let i = 0; i < pdfPts.length; i++) {
+            const a = pdfPts[i];
+            const b = pdfPts[(i + 1) % pdfPts.length];
+            page.drawLine({
+              start: a,
+              end: b,
+              thickness: ann.strokeWidth ?? 1.75,
+              color: strokeCol,
+              opacity,
+            });
+          }
+        }
       } else {
+        // 'box' or 'badge'
+        const tr = centeredPdfRectTransform(
+          pdfCenter.x,
+          pdfCenter.y,
+          boxW,
+          boxH,
+          geom.rot,
+          cssRot,
+        );
         page.drawRectangle({
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
+          x: tr.x,
+          y: tr.y,
+          width: boxW,
+          height: boxH,
           borderColor: parseHexRgb(ann.color),
           borderWidth: ann.strokeWidth ?? 1.75,
           ...(ann.fillColor && ann.fillColor !== 'transparent'
@@ -318,18 +511,26 @@ export async function applyPdfEdits(
             : {}),
           opacity,
           borderOpacity: opacity,
+          rotate: degrees(tr.rotateDeg),
         });
       }
     } else if (ann.kind === 'image') {
       try {
-        const bounds = visualRectToPdfBounds(
-          geom,
-          ann.xPct,
-          ann.yPct,
-          ann.wPct,
-          ann.hPct,
+        const boxW = Math.max(0, ann.wPct) * geom.visualW;
+        const boxH = Math.max(0, ann.hPct) * geom.visualH;
+        if (boxW <= 0 || boxH <= 0) continue;
+        const cxU = (ann.xPct + ann.wPct / 2) * geom.visualW;
+        const cyV = (ann.yPct + ann.hPct / 2) * geom.visualH;
+        const pdfCenter = visualUvToPdfPoint(geom, cxU, cyV);
+        const tr = centeredPdfRectTransform(
+          pdfCenter.x,
+          pdfCenter.y,
+          boxW,
+          boxH,
+          geom.rot,
+          ann.rotationDeg ?? 0,
         );
-        if (bounds.width <= 0 || bounds.height <= 0) continue;
+
         const dataIdx = ann.src.indexOf(',');
         const base64Body = dataIdx >= 0 ? ann.src.slice(dataIdx + 1) : ann.src;
         const bin = atob(base64Body);
@@ -339,11 +540,12 @@ export async function applyPdfEdits(
           ? await pdfDoc.embedPng(imgBytes)
           : await pdfDoc.embedJpg(imgBytes);
         page.drawImage(embedded, {
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
+          x: tr.x,
+          y: tr.y,
+          width: boxW,
+          height: boxH,
           opacity,
+          rotate: degrees(tr.rotateDeg),
         });
       } catch {
         // Ignore invalid/corrupt image embeds cleanly
@@ -393,48 +595,46 @@ export async function applyPdfEdits(
       const size = Math.max(8, Math.min(72, ann.fontSize || 14));
       const lineHeight = size * 1.25;
       const color = parseHexRgb(ann.color);
+      const cssRot = ann.rotationDeg ?? 0;
+
+      const maxLineWidth = Math.max(
+        24,
+        ...lines.map((line) => font.widthOfTextAtSize(line || ' ', size)),
+      );
+      const boxW = ann.wPct ? ann.wPct * geom.visualW : maxLineWidth + 8;
+      const boxH = ann.hPct ? ann.hPct * geom.visualH : lines.length * lineHeight + 6;
+      const cxU = ann.xPct * geom.visualW + boxW / 2;
+      const cyV = ann.yPct * geom.visualH + boxH / 2;
 
       if (ann.bgFill) {
-        const maxLineWidth = Math.max(
-          24,
-          ...lines.map((line) => font.widthOfTextAtSize(line || ' ', size)),
+        const pdfCenter = visualUvToPdfPoint(geom, cxU, cyV);
+        const tr = centeredPdfRectTransform(
+          pdfCenter.x,
+          pdfCenter.y,
+          boxW,
+          boxH,
+          geom.rot,
+          cssRot,
         );
-        const padX = 4;
-        const padY = 3;
-        const wPct = Math.min(
-          1 - ann.xPct,
-          (maxLineWidth + padX * 2) / geom.visualW,
-        );
-        const hPct = Math.min(
-          1 - ann.yPct,
-          (lines.length * lineHeight + padY * 2) / geom.visualH,
-        );
-        const bgBounds = visualRectToPdfBounds(
-          geom,
-          Math.max(0, ann.xPct - padX / geom.visualW),
-          Math.max(0, ann.yPct - padY / geom.visualH),
-          wPct,
-          hPct,
-        );
-        if (bgBounds.width > 0 && bgBounds.height > 0) {
-          page.drawRectangle({
-            x: bgBounds.x,
-            y: bgBounds.y,
-            width: bgBounds.width,
-            height: bgBounds.height,
-            color: parseHexRgb(ann.bgFill),
-            opacity,
-          });
-        }
+        page.drawRectangle({
+          x: tr.x,
+          y: tr.y,
+          width: boxW,
+          height: boxH,
+          color: parseHexRgb(ann.bgFill),
+          opacity,
+          rotate: degrees(tr.rotateDeg),
+        });
       }
 
       for (let idx = 0; idx < lines.length; idx++) {
         const lineText = lines[idx];
         if (!lineText) continue;
+        const uLine = ann.xPct * geom.visualW + 4;
         const vBaseline =
-          ann.yPct * geom.visualH + size * 0.92 + idx * lineHeight;
-        const yPctLine = Math.min(0.99, vBaseline / geom.visualH);
-        const pt = visualPctToPdfPoint(geom, ann.xPct, yPctLine);
+          ann.yPct * geom.visualH + size * 0.92 + idx * lineHeight + 2;
+        const rotatedStart = rotateVisualPoint(cxU, cyV, uLine, vBaseline, cssRot);
+        const pt = visualUvToPdfPoint(geom, rotatedStart.u, rotatedStart.v);
         page.drawText(lineText, {
           x: pt.x,
           y: pt.y,
@@ -442,7 +642,7 @@ export async function applyPdfEdits(
           font,
           color,
           opacity,
-          rotate: degrees(geom.rot - (ann.rotationDeg ?? 0)),
+          rotate: degrees(geom.rot - cssRot),
         });
       }
     }

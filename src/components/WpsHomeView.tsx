@@ -7,6 +7,7 @@ import {
   FilePlus2,
   FileText,
   FolderOpen,
+  Heart,
   LayoutTemplate,
   LogOut,
   Moon,
@@ -89,6 +90,7 @@ interface WpsHomeViewProps {
   onOpenGooglePicker: () => void;
   onRequestSaveToDrive: (doc: WpsDocument) => void;
   onOpenAiCreator?: (format?: 'DOCX' | 'PPTX' | 'PDF') => void;
+  onOpenDonations: () => void;
 }
 
 function GoogleSignInButton({
@@ -161,6 +163,7 @@ export default function WpsHomeView({
   onOpenGooglePicker,
   onRequestSaveToDrive,
   onOpenAiCreator,
+  onOpenDonations,
 }: WpsHomeViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -311,6 +314,14 @@ export default function WpsHomeView({
           </nav>
 
           <div className="space-y-3 border-t border-slate-200 p-4 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onOpenDonations}
+              className="flex h-11 w-full items-center gap-3 rounded-xl bg-rose-50 px-3.5 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/70"
+            >
+              <Heart className="h-4 w-4 shrink-0 fill-rose-500 text-rose-500" />
+              <span>Apoyar al creador</span>
+            </button>
             <div className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
               {documents.length} documentos en caché local
             </div>
@@ -687,19 +698,46 @@ export default function WpsHomeView({
 
                   {filteredDocs.length === 0 ? (
                     <div className="px-6 py-12 text-center">
-                      <p className="text-sm text-slate-600 dark:text-slate-400">
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
                         {searchQuery
                           ? `No se encontraron documentos para "${searchQuery}".`
-                          : 'No hay documentos en esta vista.'}
+                          : activeTab === 'starred'
+                            ? 'Aún no tienes documentos destacados.'
+                            : 'Tu espacio de documentos está limpio y listo.'}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => onCreateFromTemplate(WPS_TEMPLATES[0])}
-                        className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-[#EA3D2F] px-5 text-xs font-semibold text-white hover:bg-[#D63124]"
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>Crear nuevo documento</span>
-                      </button>
+                      {!searchQuery && activeTab !== 'starred' && (
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Crea un documento en blanco, genera uno con IA o abre un archivo desde tu dispositivo.
+                        </p>
+                      )}
+                      <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => onCreateFromTemplate(WPS_TEMPLATES[0])}
+                          className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#EA3D2F] px-5 text-xs font-semibold text-white hover:bg-[#D63124]"
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>Crear nuevo documento</span>
+                        </button>
+                        {onOpenAiCreator && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenAiCreator('DOCX')}
+                            className="inline-flex h-11 items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 text-xs font-semibold text-white hover:opacity-95"
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            <span>Crear con IA</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                        >
+                          <Upload className="h-4 w-4" />
+                          <span>Abrir archivo</span>
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -776,6 +814,14 @@ export default function WpsHomeView({
             <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-4 text-xs text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
               <span>ALX Office · Suite documental offline y Drive</span>
               <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={onOpenDonations}
+                  className="inline-flex items-center gap-1 font-medium text-rose-600 hover:underline dark:text-rose-400"
+                >
+                  <Heart className="h-3.5 w-3.5 fill-rose-500 text-rose-500" />
+                  <span>Apoyar al creador</span>
+                </button>
                 <a
                   href="/privacy.html"
                   className="hover:text-slate-800 hover:underline dark:hover:text-slate-200"
@@ -797,7 +843,7 @@ export default function WpsHomeView({
       {/* Mobile Fixed Bottom Navigation Bar (64px) */}
       <nav
         aria-label="Navegación móvil ALX Office"
-        className="fixed bottom-0 left-0 right-0 z-40 grid h-16 grid-cols-4 items-center border-t border-slate-200 bg-white/95 backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/95"
+        className="fixed bottom-0 left-0 right-0 z-40 grid h-16 grid-cols-5 items-center border-t border-slate-200 bg-white/95 backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/95"
       >
         <button
           type="button"
@@ -836,6 +882,15 @@ export default function WpsHomeView({
         >
           <LayoutTemplate className="h-5 w-5" />
           <span className="mt-1 text-[11px] font-medium tracking-tight">Plantillas</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenDonations}
+          className="flex h-full flex-col items-center justify-center text-rose-600 dark:text-rose-400"
+        >
+          <Heart className="h-5 w-5 fill-rose-500 text-rose-500" />
+          <span className="mt-1 text-[11px] font-semibold tracking-tight">Apoyar</span>
         </button>
 
         <button

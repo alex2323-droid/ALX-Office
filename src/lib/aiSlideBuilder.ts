@@ -61,10 +61,41 @@ export function buildWpsSlideFromAiProposal(
     result.fontFamily?.trim() || '"Plus Jakarta Sans", system-ui, sans-serif';
   const visualStyle = resolveVisualStyle(result.visualStyle, slideIndex);
 
-  const safeBullets =
-    result.bullets && result.bullets.length > 0
+  const rawAny = result as unknown as Record<string, unknown>;
+  const rawBulletSource =
+    Array.isArray(result.bullets) && result.bullets.length > 0
       ? result.bullets
-      : ['Contenido generado por IA'];
+      : Array.isArray(rawAny.cards)
+        ? rawAny.cards
+        : Array.isArray(rawAny.items)
+          ? rawAny.items
+          : Array.isArray(rawAny.points)
+            ? rawAny.points
+            : [];
+
+  const extractedBullets = rawBulletSource
+    .map((entry: unknown) => {
+      if (typeof entry === 'string') return entry.trim();
+      if (entry && typeof entry === 'object') {
+        const obj = entry as Record<string, unknown>;
+        const head = String(obj.title ?? obj.heading ?? obj.label ?? '').trim();
+        const body = String(obj.description ?? obj.body ?? obj.text ?? '').trim();
+        if (head && body) return `${head}: ${body}`;
+        return head || body;
+      }
+      return '';
+    })
+    .filter(
+      (line: string) =>
+        line.length > 0 && !/^contenido generado (por|con) ia$/i.test(line),
+    );
+
+  const safeBullets =
+    extractedBullets.length > 0
+      ? extractedBullets
+      : result.subtitle?.trim()
+        ? [result.subtitle.trim()]
+        : [result.title?.trim() || 'Resumen'];
 
   // COVER LAYOUTS WITH VARIED CANVA COMPOSITIONS
   if (result.layoutType === 'cover') {
@@ -186,10 +217,10 @@ export function buildWpsSlideFromAiProposal(
           isTitle: true,
           xPct: 33,
           yPct: 28,
-          wPct: 60,
+          wPct: result.imageUrl ? 25 : 60,
           hPct: 26,
           fontFamily,
-          fontSizePt: 34,
+          fontSizePt: result.imageUrl ? 26 : 34,
           richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
           paragraphs: [
             {
@@ -198,7 +229,7 @@ export function buildWpsSlideFromAiProposal(
                 {
                   text: result.title,
                   bold: true,
-                  fontSizePt: 34,
+                  fontSizePt: result.imageUrl ? 26 : 34,
                   color: primaryText,
                 },
               ],
@@ -213,7 +244,7 @@ export function buildWpsSlideFromAiProposal(
           type: 'text',
           xPct: 33,
           yPct: 56,
-          wPct: 58,
+          wPct: result.imageUrl ? 25 : 58,
           hPct: 20,
           fontFamily,
           fontSizePt: 16,
@@ -248,21 +279,21 @@ export function buildWpsSlideFromAiProposal(
           id: `ai-cover-title-${now}`,
           type: 'text',
           isTitle: true,
-          xPct: 12,
+          xPct: result.imageUrl ? 8 : 12,
           yPct: 28,
-          wPct: 76,
+          wPct: result.imageUrl ? 48 : 76,
           hPct: 26,
           fontFamily,
-          fontSizePt: 34,
-          richHtml: `<p style="text-align:center"><strong>${escapeHtmlText(result.title)}</strong></p>`,
+          fontSizePt: result.imageUrl ? 28 : 34,
+          richHtml: `<p style="text-align:${result.imageUrl ? 'left' : 'center'}"><strong>${escapeHtmlText(result.title)}</strong></p>`,
           paragraphs: [
             {
-              align: 'center',
+              align: result.imageUrl ? 'left' : 'center',
               runs: [
                 {
                   text: result.title,
                   bold: true,
-                  fontSizePt: 34,
+                  fontSizePt: result.imageUrl ? 28 : 34,
                   color: primaryText,
                 },
               ],
@@ -274,7 +305,7 @@ export function buildWpsSlideFromAiProposal(
           id: `ai-cover-line-${now}`,
           type: 'shape',
           shapeKind: 'line',
-          xPct: 42,
+          xPct: result.imageUrl ? 8 : 42,
           yPct: 55,
           wPct: 16,
           hPct: 1,
@@ -287,16 +318,16 @@ export function buildWpsSlideFromAiProposal(
         elements.push({
           id: `ai-cover-sub-${now}`,
           type: 'text',
-          xPct: 14,
+          xPct: result.imageUrl ? 8 : 14,
           yPct: 60,
-          wPct: 72,
+          wPct: result.imageUrl ? 48 : 72,
           hPct: 18,
           fontFamily,
           fontSizePt: 16,
-          richHtml: `<p style="text-align:center">${escapeHtmlText(sub)}</p>`,
+          richHtml: `<p style="text-align:${result.imageUrl ? 'left' : 'center'}">${escapeHtmlText(sub)}</p>`,
           paragraphs: [
             {
-              align: 'center',
+              align: result.imageUrl ? 'left' : 'center',
               runs: [{ text: sub, fontSizePt: 16, color: secondaryText }],
             },
           ],
@@ -348,10 +379,10 @@ export function buildWpsSlideFromAiProposal(
           isTitle: true,
           xPct: 8,
           yPct: 28,
-          wPct: 74,
+          wPct: result.imageUrl ? 48 : 74,
           hPct: 28,
           fontFamily,
-          fontSizePt: 34,
+          fontSizePt: result.imageUrl ? 28 : 34,
           richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
           paragraphs: [
             {
@@ -360,7 +391,7 @@ export function buildWpsSlideFromAiProposal(
                 {
                   text: result.title,
                   bold: true,
-                  fontSizePt: 34,
+                  fontSizePt: result.imageUrl ? 28 : 34,
                   color: primaryText,
                 },
               ],
@@ -375,7 +406,7 @@ export function buildWpsSlideFromAiProposal(
           type: 'text',
           xPct: 8,
           yPct: 58,
-          wPct: 72,
+          wPct: result.imageUrl ? 48 : 72,
           hPct: 18,
           fontFamily,
           fontSizePt: 16,
@@ -389,6 +420,25 @@ export function buildWpsSlideFromAiProposal(
           zIndex: 4,
         });
       }
+    }
+
+    if (result.imageUrl) {
+      elements.push({
+        id: `ai-cover-img-${now}`,
+        type: 'image',
+        src: result.imageUrl,
+        alt: result.imageAlt || result.title,
+        xPct: visualStyle === 'split-left' ? 64 : 60,
+        yPct: 18,
+        wPct: 33,
+        hPct: 64,
+        imageFit: 'cover',
+        borderRadiusPx: 16,
+        borderColor: visualStyle === 'split-left' ? '#FFFFFF' : accent,
+        borderWidthPx: 2,
+        shadow: 'elevated',
+        zIndex: 6,
+      });
     }
 
     return {
@@ -908,6 +958,34 @@ export function buildWpsSlideFromAiProposal(
     contentBox = { x: 6, y: startY, w: 88, h: 92 - startY };
   }
 
+  if (result.imageUrl) {
+    const imgW = contentBox.w >= 70 ? 33 : 24;
+    const gap = 3;
+    const imgX = Number((contentBox.x + contentBox.w - imgW).toFixed(1));
+    const imgY = Number(contentBox.y.toFixed(1));
+    const imgH = Number(Math.min(contentBox.h, 58).toFixed(1));
+    builtElements.push({
+      id: `ai-img-${now}`,
+      type: 'image',
+      src: result.imageUrl,
+      alt: result.imageAlt || result.title,
+      xPct: imgX,
+      yPct: imgY,
+      wPct: imgW,
+      hPct: imgH,
+      imageFit: 'cover',
+      borderRadiusPx: 14,
+      borderColor: accent,
+      borderWidthPx: 1.5,
+      shadow: 'soft',
+      zIndex: nextZ++,
+    });
+    contentBox = {
+      ...contentBox,
+      w: Math.max(30, Number((contentBox.w - imgW - gap).toFixed(1))),
+    };
+  }
+
   // PLACE MAIN CONTENT ELEMENT(S) INSIDE contentBox
   if (
     result.layoutType === 'chart' &&
@@ -1012,6 +1090,12 @@ export function buildWpsSlideFromAiProposal(
       const x = contentBox.x + col * (cardW + gapX);
       const y = contentBox.y + row * (cardH + gapY);
       const cardBorder = idx % 2 === 1 ? secondaryAccent : accent;
+      const cardFontSize = cols === 3 || rowsCount >= 3 ? 13 : 14;
+      const colonIdx = txt.indexOf(':');
+      const hasSplit = colonIdx > 1 && colonIdx < 48 && colonIdx < txt.length - 1;
+      const cardTitle = hasSplit ? txt.slice(0, colonIdx).trim() : '';
+      const cardBody = hasSplit ? txt.slice(colonIdx + 1).trim() : txt;
+
       builtElements.push({
         id: `ai-card-${now}-${idx}`,
         type: 'text',
@@ -1025,20 +1109,46 @@ export function buildWpsSlideFromAiProposal(
         borderRadiusPx: 14,
         shadow: 'soft',
         fontFamily,
-        fontSizePt: cols === 3 || rowsCount >= 3 ? 13 : 14,
-        richHtml: `<p>${escapeHtmlText(txt)}</p>`,
-        paragraphs: [
-          {
-            align: 'left',
-            runs: [
+        fontSizePt: cardFontSize,
+        richHtml: hasSplit
+          ? `<p><strong>${escapeHtmlText(cardTitle)}</strong></p><p>${escapeHtmlText(cardBody)}</p>`
+          : `<p>${escapeHtmlText(txt)}</p>`,
+        paragraphs: hasSplit
+          ? [
               {
-                text: txt,
-                fontSizePt: cols === 3 || rowsCount >= 3 ? 13 : 14,
-                color: primaryText,
+                align: 'left',
+                runs: [
+                  {
+                    text: cardTitle,
+                    bold: true,
+                    fontSizePt: cardFontSize + 1,
+                    color: primaryText,
+                  },
+                ],
+              },
+              {
+                align: 'left',
+                runs: [
+                  {
+                    text: cardBody,
+                    fontSizePt: Math.max(11, cardFontSize - 1),
+                    color: secondaryText,
+                  },
+                ],
+              },
+            ]
+          : [
+              {
+                align: 'left',
+                runs: [
+                  {
+                    text: txt,
+                    fontSizePt: cardFontSize,
+                    color: primaryText,
+                  },
+                ],
               },
             ],
-          },
-        ],
         zIndex: nextZ++,
       });
     });

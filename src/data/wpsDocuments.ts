@@ -258,170 +258,33 @@ export const WPS_TEMPLATES: WpsTemplate[] = [
     contentHtml:
       '<h1>Sofía Navarro Ruiz</h1><p><strong>Ingeniera de Producto Móvil</strong> · Madrid · sofia.navarro@ejemplo.com</p><h2>Perfil profesional</h2><p>Especialista en diseño de editores de texto enriquecido, ergonomía táctil para Android y sistemas de diseño multiplataforma con más de 6 años de experiencia.</p><h2>Experiencia destacada</h2><p><strong>Líder Técnica Frontend — Estudio Norte (2023 – Actualidad)</strong></p><ul><li>Arquitectura de editor offline con historial de cambios y exportación multi-formato.</li><li>Reducción del 35% en latencia de respuesta en dispositivos de gama media.</li></ul><h2>Formación</h2><p>Grado en Ingeniería Informática — Universidad Politécnica.</p>',
   },
+  {
+    id: 'tpl-invoice',
+    title: 'Factura comercial',
+    category: 'Negocios',
+    description: 'Plantilla estructurada para cobros, datos fiscales y desglose de servicios.',
+    contentHtml:
+      '<h1>FACTURA #2026-048</h1><p><strong>Fecha de emisión:</strong> 16 de noviembre de 2026 · <strong>Vencimiento:</strong> 16 de diciembre de 2026</p><h2>Datos del cliente</h2><p><strong>Empresa:</strong> Soluciones Digitales Globales S.A.<br/><strong>NIT:</strong> J-31536656-8 · <strong>Dirección:</strong> Av. Francisco de Miranda, Torre Este</p><h2>Detalle de servicios</h2><table><thead><tr><th>Descripción</th><th>Cant.</th><th>Precio unitario</th><th>Total</th></tr></thead><tbody><tr><td>Desarrollo de Módulo PWA y Editor</td><td>1</td><td>$1,250.00</td><td>$1,250.00</td></tr><tr><td>Consultoría de Accesibilidad UX</td><td>4</td><td>$150.00</td><td>$600.00</td></tr></tbody></table><h2>Total a pagar: $1,850.00</h2><p>Por favor realizar transferencia bancaria a la cuenta indicada en los términos del servicio.</p>',
+  },
+  {
+    id: 'tpl-proposal',
+    title: 'Propuesta de proyecto',
+    category: 'Trabajo',
+    description: 'Estructura para presentar proyectos, objetivos, alcance y presupuesto.',
+    contentHtml:
+      '<h1>Propuesta técnica: Migración Cloud</h1><p><strong>Cliente:</strong> Innovación Tecnológica C.A.<br/><strong>Líder de propuesta:</strong> Equipo ALX Office</p><h2>1. Objetivo del proyecto</h2><p>Actualizar la infraestructura de almacenamiento y sincronización en tiempo real para soportar más de 50.000 usuarios activos simultáneos.</p><h2>2. Fases de ejecución</h2><ul><li><strong>Fase 1 (Semanas 1-2):</strong> Auditoría de esquemas de base de datos y reglas de seguridad.</li><li><strong>Fase 2 (Semanas 3-5):</strong> Despliegue de microservicios y pruebas de estrés.</li></ul><h2>3. Presupuesto estimado</h2><p>El costo total asciende a $4,800 USD pagaderos en tres hitos de entrega.</p>',
+  },
+  {
+    id: 'tpl-study',
+    title: 'Plan de estudio académico',
+    category: 'Personal',
+    description: 'Organizador de asignaturas, metas de lectura y cronograma de exámenes.',
+    contentHtml:
+      '<h1>Plan de Estudio Semestral</h1><p><strong>Semestre:</strong> 2026-II · <strong>Meta:</strong> Promedio superior a 9.0</p><h2>Asignaturas inscritas</h2><table><thead><tr><th>Materia</th><th>Profesor</th><th>Días</th><th>Aula</th></tr></thead><tbody><tr><td>Algoritmos Avanzados</td><td>Dr. Roberto Gomez</td><td>Lu / Mi</td><td>Lab 3</td></tr><tr><td>Bases de Datos II</td><td>Dra. Carmen Silva</td><td>Ma / Ju</td><td>Aula 204</td></tr></tbody></table><h2>Cronograma de entregas</h2><ul><li><strong>Parcial 1:</strong> 15 de diciembre de 2026</li><li><strong>Proyecto final:</strong> 20 de enero de 2027</li></ul>',
+  },
 ];
 
-export const INITIAL_WPS_DOCUMENTS: WpsDocument[] = [
-  {
-    id: 'doc-1',
-    title: 'Propuesta de Rediseño Editor Móvil',
-    format: 'DOCX',
-    folder: 'Trabajo',
-    starred: true,
-    updatedAt: 'Hoy, 12:40',
-    contentHtml:
-      '<h1>Propuesta de Rediseño: Editor WPS Android</h1><p>El objetivo principal de esta actualización es permitir la edición cómoda de documentos extensos con una sola mano, manteniendo todas las herramientas avanzadas accesibles desde la zona inferior del pulgar.</p><h2>Principios de ergonomía táctil</h2><ul><li><strong>Barra de formato rápido:</strong> Negrita, cursiva, subrayado, listas y deshacer siempre visibles sobre el teclado.</li><li><strong>Panel expandible por pestañas:</strong> Inicio, Insertar, Ver y Revisar organizados en hojas deslizables.</li><li><strong>Ajuste móvil inteligente:</strong> Reflujo automático de párrafos al ancho de pantalla para evitar desplazamiento horizontal.</li></ul><h2>Comparativa de modos de lectura</h2><table><thead><tr><th>Modo</th><th>Ancho de lienzo</th><th>Uso recomendado</th></tr></thead><tbody><tr><td>Ajuste móvil</td><td>100% del viewport</td><td>Edición rápida en teléfono</td></tr><tr><td>Vista de página A4</td><td>794 px proporcional</td><td>Revisión antes de exportar</td></tr></tbody></table><blockquote>Nota: El modo de protección ocular aplica un tono cálido sepia sobre la hoja para reducir la fatiga visual en lectura nocturna.</blockquote>',
-    comments: [
-      {
-        id: 'cm-1',
-        author: 'Ana Morales',
-        text: 'Validar que los botones de la barra inferior tengan al menos 44px de alto en pantallas pequeñas.',
-        quote: 'zona inferior del pulgar',
-        createdAt: 'Hoy, 11:15',
-        resolved: false,
-      },
-    ],
-  },
-  {
-    id: 'doc-pdf-1',
-    title: 'Manual de Producto WPS Android (3 págs.)',
-    format: 'PDF',
-    folder: 'Documentación',
-    starred: true,
-    updatedAt: 'Hoy, 11:50',
-    contentHtml: '',
-    comments: [],
-  },
-  {
-    id: 'doc-pptx-1',
-    title: 'Presentación Trimestral Q4 — Producto Móvil',
-    format: 'PPTX',
-    folder: 'Presentaciones',
-    starred: true,
-    updatedAt: 'Hoy, 10:15',
-    contentHtml: '',
-    slides: [
-      {
-        id: 's-1',
-        index: 1,
-        title: 'Resultados Q4: Suite Documental Android',
-        subtitle: 'Revisión de rendimiento, lectura multi-formato y experiencia táctil',
-        bullets: [
-          'Cobertura completa para DOCX, DOC, PDF, PPTX y PPT sin dependencias externas.',
-          'Diseño optimizado para pulgar con controles inferiores de 44 px.',
-        ],
-        notes: 'Abrir la reunión resumiendo el enfoque en lectura rápida y edición sin fricción.',
-      },
-      {
-        id: 's-2',
-        index: 2,
-        title: 'Uso por tipo de archivo en dispositivos móviles',
-        bullets: [
-          'PDF representa el 44% de aperturas rápidas para revisión y firma.',
-          'DOCX y DOC concentran el 38% de sesiones con edición activa.',
-          'PPTX y PPT alcanzan el 18% en consultas previas a reuniones.',
-        ],
-        table: {
-          headers: ['Formato', 'Aperturas / mes', 'Tiempo medio'],
-          rows: [
-            ['PDF', '68.400', '3m 45s'],
-            ['DOCX / DOC', '59.100', '7m 10s'],
-            ['PPTX / PPT', '28.200', '2m 50s'],
-          ],
-        },
-        notes: 'Destacar que los usuarios alternan entre modo vertical y vista de notas durante presentaciones.',
-      },
-      {
-        id: 's-3',
-        index: 3,
-        title: 'Mejoras clave del visor de presentaciones',
-        bullets: [
-          'Tira inferior de miniaturas para saltar a cualquier diapositiva al instante.',
-          'Panel desplegable de notas del orador legible bajo luz solar o modo oscuro.',
-          'Modo presentación a pantalla completa con gestos o flechas de teclado.',
-        ],
-        notes: 'Demostrar el botón Reproducir en la barra superior del visor.',
-      },
-      {
-        id: 's-4',
-        index: 4,
-        title: 'Hoja de ruta — Próximo trimestre',
-        bullets: [
-          'Anotaciones manuscritas sobre páginas PDF.',
-          'Exportación directa de diapositivas PPTX a documento resumido.',
-          'Sincronización offline prioritaria para documentos marcados como destacados.',
-        ],
-        notes: 'Confirmar fechas límite con el equipo de QA antes del cierre.',
-      },
-    ],
-    comments: [],
-  },
-  {
-    id: 'doc-ppt-1',
-    title: 'Resumen Ejecutivo Legacy (Formato PPT)',
-    format: 'PPT',
-    folder: 'Archivo',
-    starred: false,
-    updatedAt: 'Ayer, 19:30',
-    contentHtml: '',
-    slides: [
-      {
-        id: 'sp-1',
-        index: 1,
-        title: 'Arquitectura de Compatibilidad Binaria (.ppt / .doc)',
-        subtitle: 'Lectura segura en navegador sin ejecución de macros',
-        bullets: [
-          'Extracción de cadenas UTF-16LE y Latin-1 desde contenedores OLE2.',
-          'Visualización estructurada por diapositivas y exportación a HTML.',
-        ],
-        notes: 'Este documento ilustra cómo el visor presenta archivos .ppt heredados.',
-      },
-      {
-        id: 'sp-2',
-        index: 2,
-        title: 'Flujo de conversión segura',
-        bullets: [
-          'Lectura exclusiva en memoria (ArrayBuffer) sin envío a servidores.',
-          'Conservación de encabezados, bloques de texto y orden de lectura.',
-        ],
-        notes: 'Recordar al usuario que puede importar archivos .ppt locales desde la pantalla principal.',
-      },
-    ],
-    comments: [],
-  },
-  {
-    id: 'doc-3',
-    title: 'Guía de Estilo Editorial 2026',
-    format: 'DOC',
-    folder: 'Documentación',
-    starred: false,
-    updatedAt: '10 nov 2026',
-    contentHtml:
-      '<h1>Guía de Estilo Editorial</h1><p>Normas base para redactar especificaciones técnicas y manuales de usuario dentro de la suite documental en formato <strong>.doc</strong> compatible con Word.</p><h2>Jerarquía tipográfica</h2><p>Utilizar <strong>Título 1</strong> únicamente para el encabezado principal del documento y <strong>Título 2</strong> para cada sección temática.</p><p>Evitar bloques de texto superiores a cinco líneas sin subtítulos o viñetas que faciliten el escaneo en pantalla móvil.</p>',
-    comments: [],
-  },
-  {
-    id: 'doc-2',
-    title: 'Minuta Semanal — Equipo Android',
-    format: 'DOCX',
-    folder: 'Reuniones',
-    starred: false,
-    updatedAt: 'Ayer, 17:05',
-    contentHtml:
-      '<h1>Minuta Semanal — Equipo Android</h1><p><strong>Asistentes:</strong> Elena, Marcos, Lucía y Javier.</p><h2>Temas revisados</h2><ol><li>Implementación de Buscar y Reemplazar con contador de coincidencias en vivo.</li><li>Soporte para inserción rápida de tablas editables y listas de verificación.</li><li>Visores nativos para PDF, PPT y PPTX integrados en el gestor.</li></ol><h2>Pendientes</h2><p>Revisar el contraste en modo oscuro para anotaciones resaltadas en amarillo.</p>',
-    comments: [],
-  },
-  {
-    id: 'doc-4',
-    title: 'Notas Rápidas de Campo',
-    format: 'TXT',
-    folder: 'Personal',
-    starred: false,
-    updatedAt: '06 nov 2026',
-    contentHtml:
-      '<h1>Notas Rápidas de Campo</h1><p>Ideas iniciales para mejorar la experiencia de importación desde almacenamiento local (.pdf, .ppt, .pptx, .doc, .docx, .txt) directamente dentro del gestor de archivos.</p>',
-    comments: [],
-  },
-];
+export const INITIAL_WPS_DOCUMENTS: WpsDocument[] = [];
 
 export function computeDocStats(html: string): {
   words: number;
@@ -431,6 +294,7 @@ export function computeDocStats(html: string): {
 } {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html || '', 'text/html');
+  doc.body.querySelectorAll('[data-alx-canva-layers="1"]').forEach((node) => node.remove());
   const rawText = (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
   const words = rawText ? rawText.split(' ').filter(Boolean).length : 0;
   const chars = (doc.body.textContent || '').replace(/\n/g, '').length;

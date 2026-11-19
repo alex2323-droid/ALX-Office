@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { WifiOff } from 'lucide-react';
 import AiCreateDocumentModal from './components/AiCreateDocumentModal';
+import DonationModal from './components/DonationModal';
 import WpsEditorView from './components/WpsEditorView';
 import WpsHomeView, { HomeTab } from './components/WpsHomeView';
 import WpsPdfViewer from './components/WpsPdfViewer';
@@ -18,6 +19,7 @@ import {
   loadInitialDocumentsSync,
   saveCachedDocuments,
 } from './lib/offlineDocStore';
+import { stripDocCanvaLayerMarkup } from './lib/docCanvaLayers';
 import { testFirestoreConnection } from './lib/firebase';
 import {
   deleteCloudDocument,
@@ -106,6 +108,7 @@ export default function App() {
   const [isUploadingDrive, setIsUploadingDrive] = useState(false);
   const [aiCreateOpen, setAiCreateOpen] = useState(false);
   const [aiCreateFormat, setAiCreateFormat] = useState<'DOCX' | 'PPTX' | 'PDF'>('DOCX');
+  const [donationModalOpen, setDonationModalOpen] = useState(false);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -428,10 +431,11 @@ export default function App() {
   const handleExportDocument = (doc: WpsDocument, kind: 'doc' | 'html' | 'txt') => {
     const safeName =
       doc.title.replace(/[^\w\dáéíóúñÁÉÍÓÚÑ\-_ ]+/g, '').trim() || 'documento';
+    const cleanBodyHtml = stripDocCanvaLayerMarkup(doc.contentHtml);
 
     if (kind === 'txt') {
       const parser = new DOMParser();
-      const parsed = parser.parseFromString(doc.contentHtml, 'text/html');
+      const parsed = parser.parseFromString(cleanBodyHtml, 'text/html');
       const plain = parsed.body.innerText || parsed.body.textContent || '';
       downloadBlob(`${safeName}.txt`, plain, 'text/plain;charset=utf-8');
       return;
@@ -450,7 +454,7 @@ export default function App() {
   blockquote { border-left: 3px solid #94a3b8; padding-left: 12px; color: #334155; }
 </style>
 </head>
-<body>${doc.contentHtml}</body>
+<body>${cleanBodyHtml}</body>
 </html>`;
 
     if (kind === 'html') {
@@ -460,7 +464,7 @@ export default function App() {
 
     const wordDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title></head>
-<body>${doc.contentHtml}</body>
+<body>${cleanBodyHtml}</body>
 </html>`;
     downloadBlob(`${safeName}.doc`, wordDoc, 'application/msword;charset=utf-8');
   };
@@ -847,6 +851,7 @@ export default function App() {
           setAiCreateFormat(format || 'DOCX');
           setAiCreateOpen(true);
         }}
+        onOpenDonations={() => setDonationModalOpen(true)}
       />
 
       <AiCreateDocumentModal
@@ -855,6 +860,11 @@ export default function App() {
         initialFormat={aiCreateFormat}
         onClose={() => setAiCreateOpen(false)}
         onCreateDocument={handleCreateAiDocument}
+      />
+
+      <DonationModal
+        open={donationModalOpen}
+        onClose={() => setDonationModalOpen(false)}
       />
     </>
   );

@@ -3,6 +3,7 @@ import type { WpsSlide, WpsSlideElement } from '../data/wpsDocuments';
 import {
   CanvaChartRenderer,
   CanvaShapeSvg,
+  getImageFilterCss,
   getShadowCss,
 } from './CanvaControls';
 
@@ -90,6 +91,42 @@ export default function AiSlideCanvasPreview({
                   borderWidthPx={el.borderWidthPx}
                   borderStyle={el.borderStyle}
                   borderRadiusPx={el.borderRadiusPx}
+                />
+              </div>
+            );
+          }
+
+          if (el.type === 'image') {
+            return (
+              <div
+                key={el.id}
+                style={{
+                  ...style,
+                  boxShadow: getShadowCss(el.shadow),
+                }}
+                className="overflow-hidden"
+              >
+                <img
+                  src={el.src}
+                  alt={el.alt || 'Imagen de diapositiva'}
+                  referrerPolicy="no-referrer"
+                  draggable={false}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: el.imageFit || 'cover',
+                    filter: getImageFilterCss(
+                      el.filterPreset,
+                      el.brightness ?? 100,
+                      el.contrast ?? 100,
+                      el.saturate ?? 100,
+                    ),
+                    borderRadius: el.borderRadiusPx ? `${el.borderRadiusPx}px` : undefined,
+                    border:
+                      el.borderColor || el.borderWidthPx
+                        ? `${Math.max(1, el.borderWidthPx || 1.5)}px solid ${el.borderColor || '#CBD5E1'}`
+                        : undefined,
+                  }}
                 />
               </div>
             );

@@ -8,6 +8,21 @@ export interface AiDocumentDesignContext {
   hasTables?: boolean;
 }
 
+export type AiTeamModelOption =
+  | 'auto'
+  | 'gemini'
+  | 'gemma-4-e4b'
+  | 'gemma-4-e2b'
+  | 'gemma-4-26b'
+  | 'gemma-4-31b'
+  | 'nemotron-ultra'
+  | 'nemotron-fast'
+  | 'nemotron-vl'
+  | 'ernie-flash'
+  | 'gpt-120b'
+  | 'qwen'
+  | 'gpt-20b';
+
 export interface AiDocumentEditRequest {
   action: string;
   customPrompt?: string;
@@ -16,6 +31,7 @@ export interface AiDocumentEditRequest {
   currentHtml?: string;
   documentTitle: string;
   fileType: string;
+  preferredModel?: AiTeamModelOption;
   designContext?: AiDocumentDesignContext;
 }
 
@@ -25,6 +41,8 @@ export interface AiDocumentEditResponse {
   designNotes?: string;
   suggestedPageBgColor?: string;
   suggestedFontFamily?: 'sans' | 'serif' | 'mono';
+  modelUsed?: string;
+  teamRole?: string;
 }
 
 export interface AiSlideDesignContext {
@@ -43,13 +61,47 @@ export type SlideVisualStyle =
   | 'minimal-frame'
   | 'spotlight';
 
+export type SlideImageMode = 'none' | 'search' | 'generate';
+
+export interface SlideQuestionOption {
+  id: string;
+  question: string;
+  options: string[];
+  allowCustom?: boolean;
+}
+
+export interface SlideQuestionAnswer {
+  question: string;
+  answer: string;
+}
+
+export interface AiSlideQuestionsRequest {
+  purpose?: 'edit-slide' | 'create-pptx';
+  presentationTitle: string;
+  slideTitle?: string;
+  slideTexts?: string[];
+  otherSlideTitles?: string[];
+  initialPrompt?: string;
+}
+
+export interface AiSlideQuestionsResponse {
+  intro: string;
+  questions: SlideQuestionOption[];
+  modelUsed?: string;
+  teamRole?: string;
+}
+
 export interface AiSlideEditRequest {
   action: string;
   customPrompt?: string;
   slideTitle?: string;
   slideTexts?: string[];
   presentationTitle: string;
+  preferredModel?: AiTeamModelOption;
   slideContext?: AiSlideDesignContext;
+  imageMode?: SlideImageMode;
+  preserveContent?: boolean;
+  qaAnswers?: SlideQuestionAnswer[];
   variationHint?: {
     avoidLayout?: string;
     avoidVisualStyle?: string;
@@ -75,7 +127,12 @@ export interface AiSlideEditResponse {
   chartPoints?: { label: string; value: number }[];
   tableHeaders?: string[];
   tableRows?: string[][];
+  imageUrl?: string;
+  imageAlt?: string;
+  imageSourceRole?: string;
   summary: string;
+  modelUsed?: string;
+  teamRole?: string;
 }
 
 export interface AiPdfAssistRequest {
@@ -86,6 +143,7 @@ export interface AiPdfAssistRequest {
   pageNumber: number;
   totalPages: number;
   documentTitle: string;
+  preferredModel?: AiTeamModelOption;
 }
 
 export interface AiPdfAssistResponse {
@@ -93,6 +151,8 @@ export interface AiPdfAssistResponse {
   bgColor?: string;
   textColor?: string;
   summary: string;
+  modelUsed?: string;
+  teamRole?: string;
 }
 
 export interface AiCreateDocumentRequest {
@@ -103,6 +163,9 @@ export interface AiCreateDocumentRequest {
   palette?: string;
   fontStyle?: string;
   sectionCount?: number;
+  preferredModel?: AiTeamModelOption;
+  imageMode?: SlideImageMode;
+  qaAnswers?: SlideQuestionAnswer[];
 }
 
 export interface AiCreateDocumentResponse {
@@ -115,6 +178,20 @@ export interface AiCreateDocumentResponse {
   fontFamily?: 'sans' | 'serif' | 'mono';
   pagesHtml?: string[];
   slides?: AiSlideEditResponse[];
+  modelUsed?: string;
+  teamRole?: string;
+}
+
+export interface AiTranscribeAudioRequest {
+  audioBase64: string;
+  mimeType?: string;
+  language?: string;
+}
+
+export interface AiTranscribeAudioResponse {
+  text: string;
+  modelUsed: string;
+  teamRole: string;
 }
 
 function resolveAiUrl(path: string): string {
@@ -176,6 +253,12 @@ export function requestAiDocumentEdit(
   return postJson<AiDocumentEditResponse>('/api/ai/edit-document', req);
 }
 
+export function requestAiSlideQuestions(
+  req: AiSlideQuestionsRequest,
+): Promise<AiSlideQuestionsResponse> {
+  return postJson<AiSlideQuestionsResponse>('/api/ai/slide-questions', req);
+}
+
 export function requestAiSlideEdit(
   req: AiSlideEditRequest,
 ): Promise<AiSlideEditResponse> {
@@ -192,4 +275,10 @@ export function requestAiCreateDocument(
   req: AiCreateDocumentRequest,
 ): Promise<AiCreateDocumentResponse> {
   return postJson<AiCreateDocumentResponse>('/api/ai/create-document', req);
+}
+
+export function requestAiTranscribeAudio(
+  req: AiTranscribeAudioRequest,
+): Promise<AiTranscribeAudioResponse> {
+  return postJson<AiTranscribeAudioResponse>('/api/ai/transcribe-audio', req);
 }

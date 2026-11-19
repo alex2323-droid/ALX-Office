@@ -1,9 +1,13 @@
 import React, { useId } from 'react';
 import {
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Copy,
   Edit3,
+  FlipHorizontal,
+  FlipVertical,
   Lock,
   Paintbrush,
   RotateCw,
@@ -1005,7 +1009,11 @@ export function CanvaSelectionBox({
             </div>
           ))}
 
-          {/* Bottom rotation stem & handle */}
+          {/* Bottom rotation stem & 44px-class touch handle */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-4 left-1/2 h-4 w-0.5 -translate-x-1/2 bg-[#7C3AED]"
+          />
           <div
             onPointerDown={(e) => {
               e.stopPropagation();
@@ -1013,13 +1021,244 @@ export function CanvaSelectionBox({
             }}
             style={{ touchAction: 'none' }}
             title={`Rotar (${Math.round(rotationDeg)}°)`}
-            className="pointer-events-auto absolute -bottom-10 left-1/2 flex h-8 w-8 -translate-x-1/2 cursor-grab items-center justify-center active:cursor-grabbing"
+            className="pointer-events-auto absolute -bottom-12 left-1/2 flex h-10 w-10 -translate-x-1/2 cursor-grab items-center justify-center active:cursor-grabbing"
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-800 shadow-md">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#7C3AED] bg-white text-[#7C3AED] shadow-md transition-transform active:scale-110">
               <RotateCw className="h-3.5 w-3.5" />
             </span>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+export function CanvaPositionControls({
+  rotationDeg = 0,
+  flippedX = false,
+  flippedY = false,
+  locked = false,
+  canFlip = true,
+  onChangeRotation,
+  onCommitRotation,
+  onNudge,
+  onReorderLayer,
+  onAlign,
+  onToggleFlipX,
+  onToggleFlipY,
+  onToggleLock,
+}: {
+  rotationDeg?: number;
+  flippedX?: boolean;
+  flippedY?: boolean;
+  locked?: boolean;
+  canFlip?: boolean;
+  onChangeRotation: (deg: number, immediate: boolean) => void;
+  onCommitRotation?: () => void;
+  onNudge: (dxPct: number, dyPct: number) => void;
+  onReorderLayer: (dir: 'front' | 'forward' | 'backward' | 'back') => void;
+  onAlign: (mode: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom') => void;
+  onToggleFlipX?: () => void;
+  onToggleFlipY?: () => void;
+  onToggleLock?: () => void;
+}) {
+  const roundedRot = Math.round(rotationDeg);
+  return (
+    <div className="space-y-3">
+      {/* Smooth rotation slider + quick snap steps */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-200">
+          <span>Ángulo de rotación</span>
+          <span className="font-mono font-bold tabular-nums text-[#7C3AED]">
+            {roundedRot}°
+          </span>
+        </div>
+        <input
+          type="range"
+          min={-180}
+          max={180}
+          step={1}
+          disabled={locked}
+          value={Math.max(-180, Math.min(180, roundedRot))}
+          onChange={(e) => onChangeRotation(Number(e.target.value), false)}
+          onPointerUp={() => onCommitRotation?.()}
+          className="w-full accent-[#7C3AED] disabled:opacity-40"
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {([-90, -15, 0, 15, 90] as const).map((step) => (
+            <button
+              key={step}
+              type="button"
+              disabled={locked}
+              onClick={() => {
+                if (step === 0) {
+                  onChangeRotation(0, true);
+                } else {
+                  let next = roundedRot + step;
+                  if (next > 180) next -= 360;
+                  if (next < -180) next += 360;
+                  onChangeRotation(next, true);
+                }
+              }}
+              className="min-h-[34px] flex-1 rounded-lg border border-slate-200 px-2 font-mono text-xs font-medium text-slate-700 hover:border-[#7C3AED] disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+            >
+              {step === 0 ? '0°' : step > 0 ? `+${step}°` : `${step}°`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Micro-move 1% Nudge Pad */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          Mover preciso
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => onNudge(-1, 0)}
+            aria-label="Mover izquierda"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:border-[#7C3AED] disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => onNudge(0, -1)}
+            aria-label="Mover arriba"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:border-[#7C3AED] disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => onNudge(0, 1)}
+            aria-label="Mover abajo"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:border-[#7C3AED] disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => onNudge(1, 0)}
+            aria-label="Mover derecha"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:border-[#7C3AED] disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+          >
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Layers */}
+      <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => onReorderLayer('front')}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
+        >
+          <ArrowUp className="h-3.5 w-3.5" />
+          <span>Al frente</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onReorderLayer('forward')}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
+        >
+          <span>Adelante</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onReorderLayer('backward')}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
+        >
+          <span>Atrás</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onReorderLayer('back')}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium dark:border-slate-700"
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+          <span>Al fondo</span>
+        </button>
+      </div>
+
+      {/* Alignment */}
+      <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+        {(
+          [
+            { m: 'left', label: 'Izq.' },
+            { m: 'centerH', label: 'Centro H' },
+            { m: 'right', label: 'Der.' },
+            { m: 'top', label: 'Arriba' },
+            { m: 'centerV', label: 'Centro V' },
+            { m: 'bottom', label: 'Abajo' },
+          ] as const
+        ).map((a) => (
+          <button
+            key={a.m}
+            type="button"
+            disabled={locked}
+            onClick={() => onAlign(a.m)}
+            className="min-h-[34px] rounded-lg border border-slate-200 px-2.5 text-xs font-medium hover:border-[#7C3AED] disabled:opacity-40 dark:border-slate-700"
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Flip & Lock */}
+      {(canFlip || onToggleLock) && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+          {canFlip && onToggleFlipX && (
+            <button
+              type="button"
+              disabled={locked}
+              onClick={onToggleFlipX}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium disabled:opacity-40 ${
+                flippedX
+                  ? 'border-[#7C3AED] bg-violet-50 text-[#7C3AED] dark:bg-violet-950/40 dark:text-violet-300'
+                  : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <FlipHorizontal className="h-3.5 w-3.5" />
+              <span>Voltear H</span>
+            </button>
+          )}
+          {canFlip && onToggleFlipY && (
+            <button
+              type="button"
+              disabled={locked}
+              onClick={onToggleFlipY}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium disabled:opacity-40 ${
+                flippedY
+                  ? 'border-[#7C3AED] bg-violet-50 text-[#7C3AED] dark:bg-violet-950/40 dark:text-violet-300'
+                  : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <FlipVertical className="h-3.5 w-3.5" />
+              <span>Voltear V</span>
+            </button>
+          )}
+          {onToggleLock && (
+            <button
+              type="button"
+              onClick={onToggleLock}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium ${
+                locked
+                  ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                  : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+              <span>{locked ? 'Desbloquear' : 'Bloquear'}</span>
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
