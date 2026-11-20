@@ -10,6 +10,7 @@ import {
   Heart,
   LayoutTemplate,
   LogOut,
+  MessageSquarePlus,
   Moon,
   MoreVertical,
   Pencil,
@@ -90,7 +91,7 @@ interface WpsHomeViewProps {
   onOpenGooglePicker: () => void;
   onRequestSaveToDrive: (doc: WpsDocument) => void;
   onOpenAiCreator?: (format?: 'DOCX' | 'PPTX' | 'PDF') => void;
-  onOpenDonations: () => void;
+  onOpenDonations: (tab?: 'support' | 'suggestions') => void;
 }
 
 function GoogleSignInButton({
@@ -313,14 +314,22 @@ export default function WpsHomeView({
             </button>
           </nav>
 
-          <div className="space-y-3 border-t border-slate-200 p-4 dark:border-slate-800">
+          <div className="space-y-2.5 border-t border-slate-200 p-4 dark:border-slate-800">
             <button
               type="button"
-              onClick={onOpenDonations}
+              onClick={() => onOpenDonations('support')}
               className="flex h-11 w-full items-center gap-3 rounded-xl bg-rose-50 px-3.5 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/70"
             >
               <Heart className="h-4 w-4 shrink-0 fill-rose-500 text-rose-500" />
               <span>Apoyar al creador</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenDonations('suggestions')}
+              className="flex h-10 w-full items-center gap-3 rounded-xl border border-blue-200/80 bg-blue-50/70 px-3.5 text-left text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/60"
+            >
+              <MessageSquarePlus className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span>Sugerencias y soporte</span>
             </button>
             <div className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
               {documents.length} documentos en caché local
@@ -813,14 +822,22 @@ export default function WpsHomeView({
 
             <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-4 text-xs text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
               <span>ALX Office · Suite documental offline y Drive</span>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <button
                   type="button"
-                  onClick={onOpenDonations}
+                  onClick={() => onOpenDonations('support')}
                   className="inline-flex items-center gap-1 font-medium text-rose-600 hover:underline dark:text-rose-400"
                 >
                   <Heart className="h-3.5 w-3.5 fill-rose-500 text-rose-500" />
                   <span>Apoyar al creador</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenDonations('suggestions')}
+                  className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  <MessageSquarePlus className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Sugerencias y soporte</span>
                 </button>
                 <a
                   href="/privacy.html"
@@ -886,7 +903,7 @@ export default function WpsHomeView({
 
         <button
           type="button"
-          onClick={onOpenDonations}
+          onClick={() => onOpenDonations('support')}
           className="flex h-full flex-col items-center justify-center text-rose-600 dark:text-rose-400"
         >
           <Heart className="h-5 w-5 fill-rose-500 text-rose-500" />

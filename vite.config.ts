@@ -2,14 +2,44 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import {defineConfig} from 'vite';
+import {defineConfig, loadEnv, type Plugin} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
-export default defineConfig(() => {
+function enforceClientSecretHygiene(mode: string): Plugin {
+  const check = () => {
+    const loadedViteEnv = loadEnv(mode, rootDir, 'VITE_');
+    const allViteKeys = new Set([
+      ...Object.keys(loadedViteEnv),
+      ...Object.keys(process.env).filter((k) => k.startsWith('VITE_')),
+    ]);
+    const forbidden = Array.from(allViteKeys).filter((key) =>
+      /^VITE_.*(API_KEY|SECRET|PRIVATE_KEY|ACCESS_TOKEN|PASSWORD)/i.test(key) &&
+      Boolean((loadedViteEnv[key] ?? process.env[key] ?? '').trim()),
+    );
+    if (forbidden.length > 0) {
+      throw new Error(
+        `[Security Guard] Build aborted: sensitive environment variable(s) must not use the VITE_ client prefix (${forbidden.join(', ')}).`,
+      );
+    }
+  };
+
+  return {
+    name: 'enforce-client-secret-hygiene',
+    configResolved() {
+      check();
+    },
+    buildStart() {
+      check();
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => {
   return {
     plugins: [
+      enforceClientSecretHygiene(mode),
       react(),
       tailwindcss(),
       VitePWA({

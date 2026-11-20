@@ -8,6 +8,9 @@ import {
   initializeFirestore,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { assertValidClientConfiguration } from './configValidation';
+
+assertValidClientConfiguration();
 
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
@@ -16,7 +19,8 @@ function initFirestore(): Firestore {
     return initializeFirestore(
       app,
       {
-        experimentalAutoDetectLongPolling: true,
+        ...(typeof window !== 'undefined' ? { experimentalForceLongPolling: true } : {}),
+        ignoreUndefinedProperties: true,
       },
       firebaseConfig.firestoreDatabaseId,
     );

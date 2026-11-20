@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { WifiOff } from 'lucide-react';
 import AiCreateDocumentModal from './components/AiCreateDocumentModal';
-import DonationModal from './components/DonationModal';
+import DonationModal, { SupportModalTab } from './components/DonationModal';
 import WpsEditorView from './components/WpsEditorView';
 import WpsHomeView, { HomeTab } from './components/WpsHomeView';
 import WpsPdfViewer from './components/WpsPdfViewer';
@@ -109,6 +109,7 @@ export default function App() {
   const [aiCreateOpen, setAiCreateOpen] = useState(false);
   const [aiCreateFormat, setAiCreateFormat] = useState<'DOCX' | 'PPTX' | 'PDF'>('DOCX');
   const [donationModalOpen, setDonationModalOpen] = useState(false);
+  const [donationModalTab, setDonationModalTab] = useState<SupportModalTab>('support');
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -851,7 +852,10 @@ export default function App() {
           setAiCreateFormat(format || 'DOCX');
           setAiCreateOpen(true);
         }}
-        onOpenDonations={() => setDonationModalOpen(true)}
+        onOpenDonations={(tab = 'support') => {
+          setDonationModalTab(tab);
+          setDonationModalOpen(true);
+        }}
       />
 
       <AiCreateDocumentModal
@@ -864,6 +868,7 @@ export default function App() {
 
       <DonationModal
         open={donationModalOpen}
+        initialTab={donationModalTab}
         onClose={() => setDonationModalOpen(false)}
       />
     </>

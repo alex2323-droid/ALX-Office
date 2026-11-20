@@ -8,8 +8,100 @@ import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function sanitizeErrorText(raw: unknown): string {
+  const msg = raw instanceof Error ? raw.message : String(raw || 'Error interno del servidor');
+  return msg
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
+    .replace(/([?&]key=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/\b(gsk_|sk-or-v1-|sk-|tvly-|pexafy_api_|AIza)[A-Za-z0-9_-]{8,}\b/g, '$1[REDACTED]');
+}
+
 const PORT = Number(process.env.PORT || 3000);
 const MODEL_NAME = 'gemini-4-hydrogen';
+
+const CRITICAL_PRODUCTION_SECRETS = ['GEMINI_API_KEY'] as const;
+const OPTIONAL_PROVIDER_SECRETS = [
+  'GROQ_API_KEY',
+  'OPENROUTER_API_KEY',
+  'TAVILY_API_KEY',
+  'FIRECRAWL_API_KEY',
+  'PEXAFY_API_KEY',
+  'PIXABAY_API_KEY',
+] as const;
+
+function isPlaceholderSecret(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length < 10) return true;
+  return /^(MY_|YOUR_|REPLACE_|CHANGEME|PLACEHOLDER|TODO|EXAMPLE|<[^>]+>)/i.test(trimmed);
+}
+
+export function validateProductionSecrets(): {
+  ok: boolean;
+  isProduction: boolean;
+  missingCritical: string[];
+  invalidSecrets: string[];
+  exposedClientVars: string[];
+} {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const missingCritical: string[] = [];
+  const invalidSecrets: string[] = [];
+
+  for (const key of CRITICAL_PRODUCTION_SECRETS) {
+    const val = process.env[key];
+    if (!val || !val.trim()) {
+      missingCritical.push(key);
+    } else if (isPlaceholderSecret(val)) {
+      invalidSecrets.push(key);
+    }
+  }
+
+  for (const key of OPTIONAL_PROVIDER_SECRETS) {
+    const val = process.env[key];
+    if (val && val.trim() && isPlaceholderSecret(val)) {
+      invalidSecrets.push(key);
+    }
+  }
+
+  const exposedClientVars = Object.keys(process.env).filter(
+    (name) =>
+      /^VITE_.*(API_KEY|SECRET|PRIVATE_KEY|ACCESS_TOKEN|PASSWORD)/i.test(name) &&
+      Boolean(process.env[name]?.trim()),
+  );
+
+  if (exposedClientVars.length > 0) {
+    throw new Error(
+      `[FATAL] Se detectaron variables de entorno de cliente potencialmente sensibles (${exposedClientVars.join(', ')}). Nunca expongas claves privadas con prefijo VITE_.`,
+    );
+  }
+
+  if (isProduction && (missingCritical.length > 0 || invalidSecrets.length > 0)) {
+    const details: string[] = [];
+    if (missingCritical.length > 0) {
+      details.push(`faltantes: ${missingCritical.join(', ')}`);
+    }
+    if (invalidSecrets.length > 0) {
+      details.push(`con valores de plantilla o inválidos: ${invalidSecrets.join(', ')}`);
+    }
+    throw new Error(
+      `[FATAL] No se puede inicializar ALX Office en producción porque faltan secretos críticos de configuración (${details.join('; ')}). Configúralos en Settings > Secrets antes de iniciar el servidor.`,
+    );
+  }
+
+  if (!isProduction && (missingCritical.length > 0 || invalidSecrets.length > 0)) {
+    const pending = [...missingCritical, ...invalidSecrets];
+    console.warn(
+      `[Configuración de inicio] Advertencia en desarrollo: faltan o están sin configurar (${pending.join(', ')}). En producción la aplicación bloqueará el arranque si no están definidos en Settings > Secrets.`,
+    );
+  }
+
+  return {
+    ok: missingCritical.length === 0 && invalidSecrets.length === 0 && exposedClientVars.length === 0,
+    isProduction,
+    missingCritical,
+    invalidSecrets,
+    exposedClientVars,
+  };
+}
 
 // Reorganizado estrictamente de la MÁS ALTA a la MÁS BAJA exigencia / capacidad intelectual
 export const GROQ_TEAM = {
@@ -1369,6 +1461,7 @@ const FONT_HINTS: Record<string, string> = {
 };
 
 async function startServer() {
+  validateProductionSecrets();
   const app = express();
   app.use(express.json({ limit: '3mb' }));
 
@@ -2303,7 +2396,7 @@ async function startServer() {
       const results = await searchOpenAlexWorks(query.trim());
       res.json({ results, provider: 'OpenAlex Scientific API (https://help.openalex.org/api/)' });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: sanitizeErrorText(err) });
     }
   });
 
@@ -2317,7 +2410,7 @@ async function startServer() {
       const data = await searchTavilyWeb(query.trim());
       res.json(data || { results: [], answer: 'No se pudo completar la búsqueda en Tavily.' });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: sanitizeErrorText(err) });
     }
   });
 
@@ -2331,7 +2424,7 @@ async function startServer() {
       const data = await scrapeFirecrawlUrl(url.trim());
       res.json(data || { success: false, error: 'No se pudo raspar la URL con Firecrawl.' });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: sanitizeErrorText(err) });
     }
   });
 
@@ -2394,8 +2487,8 @@ async function startServer() {
         teamRole: GROQ_TEAM.whisper.role,
       });
     } catch (err) {
-      console.error('Audio transcription error:', err);
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = sanitizeErrorText(err);
+      console.error('Audio transcription error:', msg);
       res.status(500).json({ error: msg });
     }
   });
