@@ -153,6 +153,9 @@ export default function WpsEditorView({
   const [findFeedback, setFindFeedback] = useState<string | null>(null);
 
   const [printViewMode, setPrintViewMode] = useState(false);
+  const [printPaperSize, setPrintPaperSize] = useState<'a4' | 'letter'>('a4');
+  const [printMarginMode, setPrintMarginMode] = useState<'normal' | 'narrow' | 'wide'>('normal');
+  const [printPreserveBg, setPrintPreserveBg] = useState(false);
 
   // Spellchecker
   const [spellCheckEnabled, setSpellCheckEnabled] = useState(true);
@@ -234,6 +237,7 @@ export default function WpsEditorView({
   // Reset UI & sync DOM when switching documents
   useEffect(() => {
     setIsEditing(false);
+    setPrintViewMode(false);
     setCanvaMode(false);
     setCanvaSelectedId(null);
     setCanvaEditingTextId(null);
@@ -1019,6 +1023,12 @@ export default function WpsEditorView({
   };
 
   const triggerBrowserPrint = useCallback(() => {
+    if (isEditing) {
+      persistEditorHtml(true);
+    }
+    hideSoftKeyboard();
+    setDrawerOpen(false);
+    setSpellMenu(null);
     const previousTitle = window.document.title;
     window.document.title = doc.title?.trim() || 'ALX Office';
     const restoreTitle = () => {
@@ -1030,23 +1040,49 @@ export default function WpsEditorView({
     window.setTimeout(() => {
       window.document.title = previousTitle;
     }, 1000);
-  }, [doc.title]);
+  }, [doc.title, isEditing, persistEditorHtml]);
 
-  const handleEnterPrintView = () => {
-    if (isEditing) {
-      persistEditorHtml(true);
-    }
-    hideSoftKeyboard();
-    setDrawerOpen(false);
-    setFindOpen(false);
-    setSpellMenu(null);
-    setPrintViewMode(true);
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        triggerBrowserPrint();
-      });
-    });
-  };
+  const handleEnterPrintView = useCallback(
+    (autoPrint = false) => {
+      if (isEditing) {
+        persistEditorHtml(true);
+      }
+      setDrawerOpen(false);
+      setSpellMenu(null);
+      setPrintViewMode(true);
+      if (!isEditing && !canvaMode) {
+        setIsEditing(true);
+      }
+      if (autoPrint) {
+        hideSoftKeyboard();
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            triggerBrowserPrint();
+          });
+        });
+      }
+    },
+    [isEditing, canvaMode, persistEditorHtml, triggerBrowserPrint],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && printViewMode) {
+        setPrintViewMode(false);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        if (!printViewMode) {
+          handleEnterPrintView(false);
+        } else {
+          triggerBrowserPrint();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [printViewMode, handleEnterPrintView, triggerBrowserPrint]);
 
   const fontStack =
     fontFamily === 'serif'
@@ -1065,29 +1101,182 @@ export default function WpsEditorView({
     >
       {/* Compact Sticky Top Editor Bar (52px) */}
       {printViewMode ? (
-        <header className="no-print sticky top-0 z-30 flex h-[52px] items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-3 backdrop-blur-md sm:px-5 dark:border-slate-800 dark:bg-slate-900/95">
+        <header className="no-print sticky top-0 z-30 flex min-h-[52px] flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-1.5 backdrop-blur-md sm:px-5 dark:border-slate-800 dark:bg-slate-900/95">
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
               onClick={() => setPrintViewMode(false)}
-              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               <ArrowLeft className="h-4 w-4" />
               <span>Volver al editor</span>
             </button>
-            <span className="truncate font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Vista de impresión · {doc.title}
-            </span>
+            <div className="min-w-0">
+              <div className="truncate font-display text-xs font-semibold text-slate-900 sm:text-sm dark:text-slate-100">
+                Vista de impresión · {doc.title}
+              </div>
+              <div className="hidden font-mono text-[11px] text-slate-500 sm:block dark:text-slate-400">
+                {printPaperSize === 'a4' ? 'A4 (210 × 297 mm)' : 'Carta (216 × 279 mm)'} ·{' '}
+                {Math.max(1, Math.ceil(stats.words / 275))} pág. est. · {stats.words} palabras
+              </div>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={triggerBrowserPrint}
-            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#EA3D2F] px-3.5 text-xs font-semibold text-white hover:bg-[#D63124] whitespace-nowrap shrink-0"
-          >
-            <Printer className="h-4 w-4" />
-            <span>Imprimir / PDF</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+              {(['a4', 'letter'] as const).map((sz) => (
+                <button
+                  key={sz}
+                  type="button"
+                  onClick={() => setPrintPaperSize(sz)}
+                  className={`min-h-[32px] rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                    printPaperSize === sz
+                      ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-700 dark:text-white'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {sz === 'a4' ? 'A4' : 'Carta'}
+                </button>
+              ))}
+            </div>
+
+            <select
+              aria-label="Márgenes de impresión"
+              value={printMarginMode}
+              onChange={(e) =>
+                setPrintMarginMode(e.target.value as 'normal' | 'narrow' | 'wide')
+              }
+              className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <option value="normal">Márgenes normales</option>
+              <option value="narrow">Márgenes estrechos</option>
+              <option value="wide">Márgenes amplios</option>
+            </select>
+
+            {(pageBgGradient || pageBgColor !== '#FFFFFF') && (
+              <button
+                type="button"
+                onClick={() => setPrintPreserveBg((v) => !v)}
+                className={`min-h-[36px] rounded-xl border px-2.5 text-xs font-medium transition-colors ${
+                  printPreserveBg
+                    ? 'border-[#7C3AED] bg-violet-50 text-[#7C3AED] dark:bg-violet-950/50 dark:text-violet-300'
+                    : 'border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+              >
+                {printPreserveBg ? 'Con color de fondo' : 'Papel blanco'}
+              </button>
+            )}
+
+            {showHistoryControls && (
+              <>
+                <button
+                  type="button"
+                  disabled={!history.canUndo}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleUndo}
+                  aria-label="Deshacer"
+                  title="Deshacer cambio"
+                  className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-35 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={!history.canRedo}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleRedo}
+                  aria-label="Rehacer"
+                  title="Rehacer cambio"
+                  className="hidden min-h-[36px] min-w-[36px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-35 sm:flex dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleOpenAiAssistant}
+              aria-label="Asistente IA de edición"
+              title="Asistente IA"
+              className="inline-flex min-h-[36px] items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 text-xs font-semibold text-white shadow-2xs transition-opacity hover:opacity-95 whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>IA</span>
+            </button>
+
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const nextCanva = !canvaMode;
+                if (nextCanva) {
+                  if (isEditing) persistEditorHtml(true);
+                  setIsEditing(false);
+                  setDrawerOpen(false);
+                  setSpellMenu(null);
+                  hideSoftKeyboard();
+                } else {
+                  setCanvaSelectedId(null);
+                  setCanvaEditingTextId(null);
+                }
+                setCanvaMode(nextCanva);
+              }}
+              className={`inline-flex min-h-[36px] items-center gap-1 rounded-xl px-2.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                canvaMode
+                  ? 'bg-[#7C3AED] text-white shadow-2xs'
+                  : 'border border-slate-200 bg-white text-[#7C3AED] hover:bg-violet-50 dark:border-slate-700 dark:bg-slate-800 dark:text-violet-300'
+              }`}
+            >
+              <Shapes className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Canva</span>
+            </button>
+
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (isEditing) {
+                  persistEditorHtml(true);
+                  history.commitPending();
+                  hideSoftKeyboard();
+                  setDrawerOpen(false);
+                }
+                setCanvaMode(false);
+                setCanvaSelectedId(null);
+                setCanvaEditingTextId(null);
+                setSpellMenu(null);
+                setIsEditing((v) => !v);
+              }}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                isEditing
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+              }`}
+            >
+              {isEditing ? (
+                <>
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span>Editando hoja</span>
+                </>
+              ) : (
+                <>
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span>Editar en hoja</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={triggerBrowserPrint}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#EA3D2F] px-3.5 text-xs font-semibold text-white hover:bg-[#D63124] whitespace-nowrap shrink-0"
+            >
+              <Printer className="h-4 w-4" />
+              <span>Imprimir / PDF</span>
+            </button>
+          </div>
         </header>
       ) : (
         <header className="no-print sticky top-0 z-30 flex h-[52px] items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
@@ -1222,13 +1411,13 @@ export default function WpsEditorView({
 
             <button
               type="button"
-              onClick={handleEnterPrintView}
-              aria-label="Imprimir documento"
-              title="Vista de impresión e imprimir"
+              onClick={() => handleEnterPrintView(false)}
+              aria-label="Modo vista de impresión"
+              title="Vista de impresión (A4 / Carta) e imprimir"
               className="inline-flex min-h-[44px] min-w-[40px] sm:min-w-[44px] lg:px-2.5 items-center justify-center gap-1.5 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 whitespace-nowrap shrink-0 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Printer className="h-4 w-4 shrink-0" />
-              <span className="hidden lg:inline text-xs font-medium">Imprimir</span>
+              <span className="hidden lg:inline text-xs font-medium">Vista impresión</span>
             </button>
 
             <button
@@ -1370,34 +1559,53 @@ export default function WpsEditorView({
       >
         <div
           className={`wps-print-sheet mx-auto transition-all ${
-            layoutMode === 'page' || printViewMode ? 'max-w-[794px]' : 'max-w-[680px]'
+            printViewMode
+              ? printPaperSize === 'letter'
+                ? 'max-w-[816px]'
+                : 'max-w-[794px]'
+              : layoutMode === 'page'
+                ? 'max-w-[794px]'
+                : 'max-w-[680px]'
           }`}
         >
           {/* Paper Sheet */}
           <div
             ref={paperRef}
+            data-print-margins={printViewMode ? printMarginMode : undefined}
+            data-print-preserve-bg={printViewMode && printPreserveBg ? 'true' : undefined}
             style={{
               fontFamily: fontStack,
               fontSize: printViewMode ? '11pt' : `${(16 * zoomPercent) / 100}px`,
               lineHeight: printViewMode ? '1.6' : lineSpacing,
-              ...(!eyeCareMode && !printViewMode && (pageBgGradient || pageBgColor !== '#FFFFFF')
+              ...(printViewMode
+                ? {
+                    minHeight: printPaperSize === 'letter' ? '1056px' : '1123px',
+                  }
+                : {}),
+              ...(!eyeCareMode &&
+              (!printViewMode || printPreserveBg) &&
+              (pageBgGradient || pageBgColor !== '#FFFFFF')
                 ? {
                     backgroundColor: pageBgColor,
                     backgroundImage: pageBgGradient || undefined,
-                    color: pageBgColor === '#0F2744' || pageBgColor === '#0F172A' ? '#F8FAFC' : '#0F172A',
+                    color:
+                      pageBgColor === '#0F2744' || pageBgColor === '#0F172A'
+                        ? '#F8FAFC'
+                        : '#0F172A',
                   }
                 : {}),
             }}
             className={`wps-print-paper relative min-h-[68vh] overflow-x-auto rounded-2xl border p-5 shadow-sm sm:p-10 ${
               eyeCareMode && !printViewMode
                 ? 'border-[#E6D8B8] bg-[#FBF5E6] text-[#3B2F21]'
-                : (pageBgGradient || pageBgColor !== '#FFFFFF') && !printViewMode
+                : (pageBgGradient || pageBgColor !== '#FFFFFF') &&
+                    (!printViewMode || printPreserveBg)
                   ? 'border-slate-300/80 dark:border-slate-700'
                   : 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100'
             }`}
           >
             {/* Non-destructive Spellcheck Wavy Underline Layer */}
-            {spellCheckEnabled && !printViewMode && underlineRects.length > 0 && (
+            {spellCheckEnabled && isEditing && underlineRects.length > 0 && (
               <div
                 aria-hidden="true"
                 className="no-print pointer-events-none absolute inset-0 overflow-hidden"
@@ -1419,7 +1627,7 @@ export default function WpsEditorView({
 
             <div
               ref={editorRef}
-              contentEditable={isEditing && !canvaMode && !printViewMode}
+              contentEditable={isEditing && !canvaMode}
               spellCheck={false}
               suppressContentEditableWarning
               onInput={() => persistEditorHtml(false)}
@@ -1435,7 +1643,7 @@ export default function WpsEditorView({
             {/* Floating Interactive Canva Stage Overlay (shapes, images, charts, text cards, stickers) */}
             <CanvaDocOverlayStage
               layers={canvaLayers}
-              active={canvaMode && !printViewMode}
+              active={canvaMode}
               selectedId={canvaSelectedId}
               editingTextId={canvaEditingTextId}
               onSelect={setCanvaSelectedId}
@@ -1468,7 +1676,7 @@ export default function WpsEditorView({
       </div>
 
       {/* Floating Canva Image / Block Toolbar */}
-      {!printViewMode && selectedNodeKind && (
+      {selectedNodeKind && (
         <div className="no-print fixed bottom-[60px] left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95">
           {selectedNodeKind === 'image' ? (
             <>
@@ -1608,7 +1816,7 @@ export default function WpsEditorView({
         </div>
       )}
 
-      {!printViewMode && canvaMode && (
+      {canvaMode && (
         <CanvaDocStudioDock
           layers={canvaLayers}
           selectedId={canvaSelectedId}
@@ -1622,7 +1830,7 @@ export default function WpsEditorView({
         />
       )}
 
-      {!printViewMode && !canvaMode && (
+      {!canvaMode && (
         <WpsWordEditingBar
           drawerOpen={drawerOpen}
           onDrawerOpenChange={setDrawerOpen}
@@ -1677,6 +1885,14 @@ export default function WpsEditorView({
                   >
                     <Monitor className="h-3.5 w-3.5" />
                     <span>Página A4</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleEnterPrintView(false)}
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-[#EA3D2F] hover:bg-white/70 dark:text-red-400 dark:hover:bg-slate-700/60"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    <span>Vista impresión</span>
                   </button>
                 </div>
               </div>
@@ -1790,11 +2006,19 @@ export default function WpsEditorView({
                 </button>
                 <button
                   type="button"
-                  onClick={handleEnterPrintView}
+                  onClick={() => handleEnterPrintView(false)}
                   className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
-                  <Printer className="h-4 w-4 text-[#EA3D2F]" />
-                  <span>Imprimir / PDF</span>
+                  <Eye className="h-4 w-4 text-violet-600" />
+                  <span>Vista de impresión</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleEnterPrintView(true)}
+                  className="col-span-2 flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-semibold text-[#EA3D2F] hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>Imprimir directo / Guardar PDF</span>
                 </button>
               </div>
             </div>

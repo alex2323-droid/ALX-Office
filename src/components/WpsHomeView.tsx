@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  Cloud,
   Copy,
   Download,
   Eye,
@@ -9,6 +8,7 @@ import {
   FolderOpen,
   Heart,
   LayoutTemplate,
+  LogIn,
   LogOut,
   MessageSquarePlus,
   Moon,
@@ -22,6 +22,8 @@ import {
   Sun,
   Trash2,
   Upload,
+  UserCheck,
+  UserPlus,
   X,
 } from 'lucide-react';
 import {
@@ -36,7 +38,6 @@ import {
   TemplatePageThumbnail,
   TemplatePreviewModal,
 } from './TemplatePreview';
-import { isNativeCapacitorApp } from '../lib/googleAuth';
 
 const FORMAT_FILTERS: ('ALL' | WpsFormat)[] = ['ALL', 'DOCX', 'DOC', 'PDF', 'PPTX', 'PPT', 'TXT'];
 
@@ -82,63 +83,11 @@ interface WpsHomeViewProps {
   onImportFile: (file: File) => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
-  needsGoogleAuth: boolean;
-  googleUserEmail: string | null;
-  isGoogleLoggingIn: boolean;
-  isPickerBusy: boolean;
-  onGoogleLogin: () => void;
-  onGoogleLogout: () => void;
-  onOpenGooglePicker: () => void;
-  onRequestSaveToDrive: (doc: WpsDocument) => void;
+  accountUsername: string | null;
+  onOpenAuth: (mode: 'login' | 'register') => void;
+  onLogout: () => void;
   onOpenAiCreator?: (format?: 'DOCX' | 'PPTX' | 'PDF') => void;
   onOpenDonations: (tab?: 'support' | 'suggestions') => void;
-}
-
-function GoogleSignInButton({
-  onClick,
-  disabled,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="gsi-material-button"
-    >
-      <div className="gsi-material-button-content-wrapper">
-        <div className="gsi-material-button-icon">
-          <svg
-            version="1.1"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 48 48"
-            style={{ display: 'block' }}
-          >
-            <path
-              fill="#EA4335"
-              d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-            />
-            <path
-              fill="#4285F4"
-              d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-            />
-            <path
-              fill="#34A853"
-              d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-            />
-            <path fill="none" d="M0 0h48v48H0z" />
-          </svg>
-        </div>
-        <span className="gsi-material-button-contents">Sign in with Google</span>
-      </div>
-    </button>
-  );
 }
 
 export default function WpsHomeView({
@@ -155,14 +104,9 @@ export default function WpsHomeView({
   onImportFile,
   darkMode,
   onToggleDarkMode,
-  needsGoogleAuth,
-  googleUserEmail,
-  isGoogleLoggingIn,
-  isPickerBusy,
-  onGoogleLogin,
-  onGoogleLogout,
-  onOpenGooglePicker,
-  onRequestSaveToDrive,
+  accountUsername,
+  onOpenAuth,
+  onLogout,
   onOpenAiCreator,
   onOpenDonations,
 }: WpsHomeViewProps) {
@@ -303,15 +247,6 @@ export default function WpsHomeView({
               <Upload className="h-4 w-4 shrink-0" />
               <span>Importar archivo local</span>
             </button>
-            <button
-              type="button"
-              disabled={isPickerBusy}
-              onClick={onOpenGooglePicker}
-              className="flex h-11 w-full items-center gap-3 rounded-xl px-3.5 text-left text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            >
-              <Cloud className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-              <span>{isPickerBusy ? 'Abriendo Drive...' : 'Google Picker'}</span>
-            </button>
           </nav>
 
           <div className="space-y-2.5 border-t border-slate-200 p-4 dark:border-slate-800">
@@ -427,53 +362,53 @@ export default function WpsHomeView({
 
           {/* Main Scrollable Viewport */}
           <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 p-4 sm:p-6 lg:p-8">
-            {/* Google Drive & Google Picker Strip */}
+            {/* Account & Cloud Sync Strip */}
             <section className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                  <Cloud className="h-5 w-5" />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-[#EA3D2F] dark:bg-red-950/50 dark:text-red-400">
+                  <UserCheck className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                    Google Drive y Google Picker
+                    {accountUsername
+                      ? `Sesión iniciada: @${accountUsername}`
+                      : 'Cuenta de ALX Office'}
                   </div>
                   <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {needsGoogleAuth
-                      ? isNativeCapacitorApp()
-                        ? 'En la APK local (localhost), usa la versión Web/PWA en Chrome para conectar Google Drive.'
-                        : 'Conecta tu cuenta de Google para abrir PDF, PPT, PPTX, DOC o DOCX desde Drive.'
-                      : `Conectado como ${googleUserEmail || 'Cuenta de Google'}`}
+                    {accountUsername
+                      ? 'Tus documentos y tema se sincronizan automáticamente en la nube.'
+                      : 'Crea tu usuario y contraseña o inicia sesión para guardar tus documentos en la nube.'}
                   </div>
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {needsGoogleAuth ? (
-                  <GoogleSignInButton
-                    onClick={onGoogleLogin}
-                    disabled={isGoogleLoggingIn}
-                  />
+                {accountUsername ? (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>Cerrar sesión</span>
+                  </button>
                 ) : (
                   <>
                     <button
                       type="button"
-                      disabled={isPickerBusy}
-                      onClick={onOpenGooglePicker}
-                      className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                      onClick={() => onOpenAuth('login')}
+                      className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                     >
-                      <Cloud className="h-4 w-4" />
-                      <span>
-                        {isPickerBusy ? 'Cargando archivo...' : 'Abrir desde Google Drive'}
-                      </span>
+                      <LogIn className="h-4 w-4" />
+                      <span>Iniciar sesión</span>
                     </button>
                     <button
                       type="button"
-                      onClick={onGoogleLogout}
-                      aria-label="Cerrar sesión de Google"
-                      className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      onClick={() => onOpenAuth('register')}
+                      className="inline-flex h-11 items-center gap-1.5 rounded-xl bg-[#EA3D2F] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#D63124]"
                     >
-                      <LogOut className="h-4 w-4" />
-                      <span>Salir</span>
+                      <UserPlus className="h-4 w-4" />
+                      <span>Crear cuenta</span>
                     </button>
                   </>
                 )}
@@ -821,7 +756,7 @@ export default function WpsHomeView({
             )}
 
             <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-4 text-xs text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
-              <span>ALX Office · Suite documental offline y Drive</span>
+              <span>ALX Office · Suite documental offline y en la nube</span>
               <div className="flex flex-wrap items-center gap-4">
                 <button
                   type="button"
@@ -977,33 +912,17 @@ export default function WpsHomeView({
               {(actionSheetDoc.format === 'DOCX' ||
                 actionSheetDoc.format === 'DOC' ||
                 actionSheetDoc.format === 'TXT') && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onExportDocument(actionSheetDoc, 'doc');
-                      setActionSheetDoc(null);
-                    }}
-                    className="flex h-12 w-full items-center gap-3 text-left text-sm font-medium text-slate-800 hover:text-[#EA3D2F] dark:text-slate-200"
-                  >
-                    <Download className="h-4 w-4 text-slate-400" />
-                    <span>Exportar como Word (.doc)</span>
-                  </button>
-                  {!needsGoogleAuth && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const docToSave = actionSheetDoc;
-                        setActionSheetDoc(null);
-                        onRequestSaveToDrive(docToSave);
-                      }}
-                      className="flex h-12 w-full items-center gap-3 text-left text-sm font-medium text-slate-800 hover:text-blue-600 dark:text-slate-200"
-                    >
-                      <Cloud className="h-4 w-4 text-blue-500" />
-                      <span>Guardar copia en Google Drive</span>
-                    </button>
-                  )}
-                </>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onExportDocument(actionSheetDoc, 'doc');
+                    setActionSheetDoc(null);
+                  }}
+                  className="flex h-12 w-full items-center gap-3 text-left text-sm font-medium text-slate-800 hover:text-[#EA3D2F] dark:text-slate-200"
+                >
+                  <Download className="h-4 w-4 text-slate-400" />
+                  <span>Exportar como Word (.doc)</span>
+                </button>
               )}
               <button
                 type="button"

@@ -19,11 +19,18 @@ import {
 import type { WpsDocument } from '../data/wpsDocuments';
 import {
   AiCreateDocumentResponse,
+  AiEfficiencyMode,
   SlideImageMode,
   SlideQuestionOption,
   requestAiCreateDocument,
   requestAiSlideQuestions,
 } from '../lib/aiEditorClient';
+import {
+  FreeLlmEndpointDescriptor,
+  createDocumentWithFreeLlm,
+  fetchFreeLlmProviders,
+  getLowTokenModels,
+} from '../lib/llm';
 import { buildWpsSlideFromAiProposal } from '../lib/aiSlideBuilder';
 import { buildPdfBytesFromPageHtmls } from '../lib/pdfEditor';
 import { uint8ToBase64 } from '../lib/wpsFileParser';
@@ -136,6 +143,10 @@ export default function AiCreateDocumentModal({
   const [questions, setQuestions] = useState<SlideQuestionOption[]>([]);
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
 
+  const [efficiencyMode, setEfficiencyMode] = useState<AiEfficiencyMode>('auto');
+  const [freellmapiEndpoint, setFreellmapiEndpoint] = useState('auto');
+  const [allProviders, setAllProviders] = useState<FreeLlmEndpointDescriptor[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [compilingPdf, setCompilingPdf] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -152,13 +163,37 @@ export default function AiCreateDocumentModal({
     setQuestionsIntro('');
     setQuestions([]);
     setQuestionAnswers({});
+    setEfficiencyMode('auto');
+    setFreellmapiEndpoint('auto');
     setLoading(false);
     setCompilingPdf(false);
     setErrorMsg(null);
     setResult(null);
     setPreviewSlideIdx(0);
     setPreviewPdfPageIdx(0);
+
+    let cancelled = false;
+    void fetchFreeLlmProviders()
+      .then((res) => {
+        if (cancelled) return;
+        setAllProviders(res.providers);
+      })
+      .catch(() => {
+        if (!cancelled) setAllProviders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, initialFormat]);
+
+  const lowTokenEndpoints = useMemo(
+    () =>
+      getLowTokenModels(
+        allProviders,
+        format === 'PPTX' ? 'presentation-design' : 'document-create',
+      ),
+    [allProviders, format],
+  );
 
   const builtPreviewSlides = useMemo(() => {
     if (!result?.slides || result.slides.length === 0) return [];
@@ -218,7 +253,9 @@ export default function AiCreateDocumentModal({
     setPreviewPdfPageIdx(0);
 
     try {
-      const generated = await requestAiCreateDocument({
+      const tokenMode: 'low-token' | 'standard' =
+        efficiencyMode === 'low-token' ? 'low-token' : 'standard';
+      const payload = {
         format,
         prompt: prompt.trim(),
         title: title.trim() || undefined,
@@ -226,10 +263,17 @@ export default function AiCreateDocumentModal({
         palette,
         fontStyle,
         sectionCount,
-        preferredModel: 'auto',
-        imageMode: format === 'PPTX' ? imageMode : 'none',
+        preferredModel: 'auto' as const,
+        imageMode: format === 'PPTX' ? imageMode : ('none' as const),
         qaAnswers: collectedQa.length > 0 ? collectedQa : undefined,
-      });
+        tokenMode,
+        efficiencyMode,
+        freellmapiEndpoint,
+      };
+      const generated =
+        efficiencyMode === 'low-token'
+          ? await createDocumentWithFreeLlm(payload)
+          : await requestAiCreateDocument(payload);
       setResult(generated);
     } catch (err) {
       setErrorMsg(
@@ -432,24 +476,82 @@ export default function AiCreateDocumentModal({
             </div>
           </div>
 
-          {/* Unified AI Collaborative Team Banner (Manual model list hidden) */}
-          <div className="flex items-center justify-between gap-2.5 rounded-2xl border border-violet-200/80 bg-violet-50/60 px-3.5 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/30">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
-                <Users className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  Trabajo en Equipo IA Automático
+          {/* Task-Aware Efficiency & FreeLLMAPI Engine */}
+          <div className="space-y-2.5 rounded-2xl border border-violet-200/80 bg-violet-50/60 p-3 dark:border-violet-900/50 dark:bg-violet-950/30">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
+                  <Users className="h-4 w-4" />
                 </div>
-                <p className="truncate text-[10px] text-slate-600 dark:text-slate-400">
-                  Las IA gratuitas colaboran automáticamente según contenido, diseño e imágenes
-                </p>
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    {format === 'PPTX'
+                      ? 'Motor Canva · Presentaciones de Alto Diseño'
+                      : format === 'PDF'
+                        ? 'Motor Editorial · Documentos PDF Maquetados'
+                        : 'Motor Editorial · Documentos Word Profesionales'}
+                  </div>
+                  <p className="truncate text-[10px] text-slate-600 dark:text-slate-400">
+                    {efficiencyMode === 'low-token'
+                      ? 'Prioriza modelos de bajo consumo con respaldo automático si alguno falla'
+                      : efficiencyMode === 'quality'
+                        ? 'Máximo razonamiento creativo y arquitectónico con IAs insignia + respaldo automático'
+                        : 'Prioriza tus mejores IAs con razonamiento alto, diseños únicos y respaldo automático'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-violet-200 bg-white/90 p-0.5 dark:border-violet-900/60 dark:bg-slate-900">
+                {(
+                  [
+                    { id: 'low-token', label: 'Ahorro', activeClass: 'bg-emerald-600 text-white' },
+                    { id: 'auto', label: 'Razon. Alto', activeClass: 'bg-violet-600 text-white' },
+                    { id: 'quality', label: 'Máx. Razon.', activeClass: 'bg-indigo-600 text-white' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setEfficiencyMode(opt.id)}
+                    className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-colors ${
+                      efficiencyMode === opt.id
+                        ? opt.activeClass
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
-            <span className="shrink-0 rounded-lg bg-white/90 px-2 py-1 text-[10px] font-semibold text-violet-700 shadow-2xs dark:bg-slate-900 dark:text-violet-300">
-              Equipo activo
-            </span>
+
+            {efficiencyMode === 'low-token' && (
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <label
+                  htmlFor="ai-create-freellmapi-endpoint"
+                  className="text-[10px] font-semibold text-slate-600 dark:text-slate-300"
+                >
+                  Endpoint FreeLLMAPI ({lowTokenEndpoints.length || 'auto'} activos):
+                </label>
+                <select
+                  id="ai-create-freellmapi-endpoint"
+                  value={freellmapiEndpoint}
+                  disabled={loading}
+                  onChange={(e) => setFreellmapiEndpoint(e.target.value)}
+                  className="h-8 w-full rounded-lg border border-violet-200 bg-white px-2.5 text-[11px] text-slate-900 focus:border-violet-500 focus:outline-none sm:w-80 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  <option value="auto">
+                    Automático según formato ({format === 'PPTX' ? 'Diseño' : 'Redacción'})
+                  </option>
+                  {lowTokenEndpoints.map((ep) => (
+                    <option key={ep.id} value={ep.id}>
+                      {ep.label} · {ep.baseUrl.replace(/^https?:\/\//, '')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* PPTX-only Controls: Work Mode (Auto vs Questions) & Opt-in Images */}
@@ -807,7 +909,8 @@ export default function AiCreateDocumentModal({
                                 : 'bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300'
                         }`}
                       >
-                        ⚡ {result.teamRole || result.modelUsed}
+                        ⚡ {result.taskProfile ? `${result.taskProfile} · ` : ''}
+                        {result.teamRole || result.modelUsed}
                       </span>
                     )}
                   </div>

@@ -9,8 +9,8 @@ Suite de oficina móvil y aplicación web progresiva (**PWA**) para crear, visua
 ## Características principales
 
 - **Barra de edición unificada estilo Word en todos los formatos** (`DOCX`/`DOC`/`TXT`, `PDF` y `PPT`/`PPTX`): barra inferior rápida (`Negrita`, `Cursiva`, `Subrayado`, listas, casillas) y panel **Herramientas** (`Inicio`, `Insertar`, `Ver`, `Revisar`) con estilos, colores, resaltado, tablas, imágenes, enlaces, comentarios y corrector ortográfico en español con menú contextual.
-- **Editor de documentos (DOCX / DOC / TXT)** con ajuste móvil o página A4, buscar y reemplazar, contador en vivo, vista de impresión y exportación en `.doc`, `.html` y `.txt`.
-- **Visor y editor de PDF en su propia vista** con panel lateral de miniaturas, edición directa de texto con herramientas Word, anotaciones (firma, resaltado, recuadros, tapar texto), organización de páginas y descarga en `.pdf`.
+- **Editor de documentos (DOCX / DOC / TXT)** con ajuste móvil, página A4 o **modo Vista de impresión** (selector A4/Carta, márgenes normales/estrechos/amplios y papel blanco o color de fondo), buscar y reemplazar, contador en vivo y exportación en `.doc`, `.html` y `.txt`.
+- **Visor y editor de PDF en su propia vista** con panel lateral de miniaturas, edición directa de texto con herramientas Word, anotaciones (firma, resaltado, recuadros, tapar texto), **modo Vista de impresión PDF** (todas las páginas listas para impresión sin filtros de lectura), organización de páginas y descarga en `.pdf`.
 - **Visor y editor de presentaciones (PPT / PPTX)** con edición enriquecida dentro de cada diapositiva, notas del orador, cuadrícula visual y modo presentación a pantalla completa.
 - **Almacenamiento local offline y Google Drive** con guardado automático en caché e integración con **Google Picker**.
 
@@ -35,15 +35,15 @@ Al subir el repositorio de **`alex2323-droid`** en GitHub (reemplazando `ALX-Off
 
 ## Paquete y Releases en GitHub
 
-- **Nombre del paquete (`package.json`):** `alx-office` (`v5.0.0`)
+- **Nombre del paquete (`package.json`):** `alx-office` (`v5.1.0`)
 - **ID del paquete Android (`applicationId` en `capacitor.config.json`):** `com.alx.office`
-- **Archivo APK de Release generado:** `ALX-Office-v5.0.0.apk`
-- **Equipo de IA gratuito integrado:** Gemini 4 Flash, **Gemma 4** (`gemma-4-e4b-it`, `gemma-4-e2b-it`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it`), OpenRouter `:free` (`Nemotron 550B`, `Nemotron Lightning`, `Nemotron Super VL`, `ERNIE 5.5 Flash`) y Groq (`GPT-120B`, `Qwen-27B`, `GPT-20B`, `Whisper V3 Turbo`).
+- **Archivo APK de Release generado:** `ALX-Office-v5.1.0.apk`
+- **Equipo de IA gratuito integrado:** Gemini 4 Hydrogen, **Gemma 4** (`gemma-4-e4b-it`, `gemma-4-e2b-it`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it`), NVIDIA NIM (`Kimi K3.1 Pro`), OpenRouter `:free` (`Nemotron 550B Ultra`, `Nemotron Lightning`, `Nemotron Super VL`, `ERNIE 5.5 Flash`) y Groq (`GPT-120B`, `Qwen-27B`, `GPT-20B`, `Whisper V3 Turbo`).
 - **Página de Releases:** `https://github.com/alex2323-droid/ALX-Office/releases/latest`
 - **Enlace directo de descarga del APK:**  
-  `https://github.com/alex2323-droid/ALX-Office/releases/download/v5.0.0/ALX-Office-v5.0.0.apk`
+  `https://github.com/alex2323-droid/ALX-Office/releases/download/v5.1.0/ALX-Office-v5.1.0.apk`
 
-El flujo para generar la APK está disponible en [`ci/release-apk.yml`](ci/release-apk.yml). Una vez que subas el repositorio a GitHub, puedes activarlo moviendo este archivo a `.github/workflows/release-apk.yml` para compilar automáticamente el APK firmado (`v5.0.0`) y publicarlo en **Releases**.
+El flujo para generar la APK está disponible en [`ci/release-apk.yml`](ci/release-apk.yml). Una vez que subas el repositorio a GitHub, puedes activarlo moviendo este archivo a `.github/workflows/release-apk.yml` para compilar automáticamente el APK firmado (`v5.1.0`) y publicarlo en **Releases**.
 
 ## Desarrollo y compilación
 

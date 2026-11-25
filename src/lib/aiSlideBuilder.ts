@@ -20,6 +20,10 @@ function isDarkHexColor(hex: string | undefined): boolean {
 }
 
 const VISUAL_STYLE_CYCLE: SlideVisualStyle[] = [
+  'bento-grid',
+  'editorial-hero',
+  'split-right',
+  'diagonal-band',
   'header-banner',
   'split-left',
   'sidebar-left',
@@ -334,8 +338,165 @@ export function buildWpsSlideFromAiProposal(
           zIndex: 4,
         });
       }
+    } else if (visualStyle === 'editorial-hero') {
+      elements.push(
+        {
+          id: `ai-cover-ed-top-${now}`,
+          type: 'shape',
+          shapeKind: 'rect',
+          xPct: 6,
+          yPct: 10,
+          wPct: 88,
+          hPct: 0.7,
+          fillColor: accent,
+          zIndex: 1,
+        },
+        {
+          id: `ai-cover-ed-num-${now}`,
+          type: 'text',
+          xPct: 6,
+          yPct: 14,
+          wPct: 24,
+          hPct: 10,
+          fontFamily,
+          fontSizePt: 12,
+          richHtml: `<p><strong style="color:${accent}">EDICIÓN · 01</strong></p>`,
+          paragraphs: [
+            {
+              align: 'left',
+              runs: [{ text: 'EDICIÓN · 01', bold: true, fontSizePt: 12, color: accent }],
+            },
+          ],
+          zIndex: 2,
+        },
+        {
+          id: `ai-cover-title-${now}`,
+          type: 'text',
+          isTitle: true,
+          xPct: 6,
+          yPct: 25,
+          wPct: result.imageUrl ? 50 : 84,
+          hPct: 32,
+          fontFamily,
+          fontSizePt: result.imageUrl ? 30 : 38,
+          richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
+          paragraphs: [
+            {
+              align: 'left',
+              runs: [
+                {
+                  text: result.title,
+                  bold: true,
+                  fontSizePt: result.imageUrl ? 30 : 38,
+                  color: primaryText,
+                },
+              ],
+            },
+          ],
+          zIndex: 3,
+        },
+        {
+          id: `ai-cover-ed-bot-${now}`,
+          type: 'shape',
+          shapeKind: 'rect',
+          xPct: 6,
+          yPct: 86,
+          wPct: 22,
+          hPct: 1.8,
+          fillColor: secondaryAccent,
+          borderRadiusPx: 99,
+          zIndex: 2,
+        },
+      );
+      if (sub) {
+        elements.push({
+          id: `ai-cover-sub-${now}`,
+          type: 'text',
+          xPct: 6,
+          yPct: 60,
+          wPct: result.imageUrl ? 50 : 68,
+          hPct: 20,
+          fontFamily,
+          fontSizePt: 16,
+          richHtml: `<p>${escapeHtmlText(sub)}</p>`,
+          paragraphs: [
+            {
+              align: 'left',
+              runs: [{ text: sub, fontSizePt: 16, color: secondaryText }],
+            },
+          ],
+          zIndex: 4,
+        });
+      }
+    } else if (visualStyle === 'diagonal-band' || visualStyle === 'split-right') {
+      elements.push(
+        {
+          id: `ai-cover-diag-1-${now}`,
+          type: 'shape',
+          shapeKind: 'rect',
+          xPct: 58,
+          yPct: -12,
+          wPct: 54,
+          hPct: 124,
+          fillColor: accent,
+          rotationDeg: visualStyle === 'diagonal-band' ? -10 : 0,
+          zIndex: 1,
+        },
+        {
+          id: `ai-cover-diag-2-${now}`,
+          type: 'shape',
+          shapeKind: 'roundRect',
+          xPct: 64,
+          yPct: 68,
+          wPct: 28,
+          hPct: 22,
+          fillColor: secondaryAccent,
+          borderRadiusPx: 20,
+          opacity: 0.35,
+          zIndex: 2,
+        },
+        {
+          id: `ai-cover-title-${now}`,
+          type: 'text',
+          isTitle: true,
+          xPct: 6,
+          yPct: 24,
+          wPct: 48,
+          hPct: 30,
+          fontFamily,
+          fontSizePt: 33,
+          richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
+          paragraphs: [
+            {
+              align: 'left',
+              runs: [{ text: result.title, bold: true, fontSizePt: 33, color: primaryText }],
+            },
+          ],
+          zIndex: 4,
+        },
+      );
+      if (sub) {
+        elements.push({
+          id: `ai-cover-sub-${now}`,
+          type: 'text',
+          xPct: 6,
+          yPct: 57,
+          wPct: 46,
+          hPct: 22,
+          fontFamily,
+          fontSizePt: 15,
+          richHtml: `<p>${escapeHtmlText(sub)}</p>`,
+          paragraphs: [
+            {
+              align: 'left',
+              runs: [{ text: sub, fontSizePt: 15, color: secondaryText }],
+            },
+          ],
+          zIndex: 5,
+        });
+      }
     } else {
-      // spotlight / header-banner / top-bar cover
+      // spotlight / header-banner / top-bar / bento-grid cover
       elements.push(
         {
           id: `ai-cover-orb1-${now}`,
@@ -874,6 +1035,341 @@ export function buildWpsSlideFromAiProposal(
     }
     const startY = result.subtitle ? 31 : 25;
     contentBox = { x: 6, y: startY, w: 88, h: 92 - startY };
+  } else if (visualStyle === 'bento-grid') {
+    builtElements.push(
+      {
+        id: `ai-bento-kicker-${now}`,
+        type: 'shape',
+        shapeKind: 'roundRect',
+        xPct: 5,
+        yPct: 5.5,
+        wPct: 9,
+        hPct: 2.2,
+        fillColor: accent,
+        borderRadiusPx: 99,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-bento-dot-${now}`,
+        type: 'shape',
+        shapeKind: 'roundRect',
+        xPct: 15.2,
+        yPct: 5.5,
+        wPct: 4.5,
+        hPct: 2.2,
+        fillColor: secondaryAccent,
+        borderRadiusPx: 99,
+        opacity: 0.75,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-title-${now}`,
+        type: 'text',
+        isTitle: true,
+        xPct: 5,
+        yPct: 9.5,
+        wPct: 64,
+        hPct: 12,
+        fontFamily,
+        fontSizePt: 25,
+        richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [
+              {
+                text: result.title,
+                bold: true,
+                fontSizePt: 25,
+                color: primaryText,
+              },
+            ],
+          },
+        ],
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-bento-index-${now}`,
+        type: 'text',
+        xPct: 82,
+        yPct: 7,
+        wPct: 13,
+        hPct: 10,
+        fillColor: isDarkBg ? 'rgba(30, 41, 59, 0.75)' : '#F1F5F9',
+        borderColor: accent,
+        borderWidthPx: 1,
+        borderRadiusPx: 12,
+        fontFamily,
+        fontSizePt: 13,
+        richHtml: `<p style="text-align:center"><strong style="color:${accent}">${String(slideIndex).padStart(2, '0')}</strong></p>`,
+        paragraphs: [
+          {
+            align: 'center',
+            runs: [
+              {
+                text: String(slideIndex).padStart(2, '0'),
+                bold: true,
+                fontSizePt: 13,
+                color: accent,
+              },
+            ],
+          },
+        ],
+        zIndex: nextZ++,
+      },
+    );
+    if (result.subtitle) {
+      builtElements.push({
+        id: `ai-sub-${now}`,
+        type: 'text',
+        xPct: 5,
+        yPct: 20.5,
+        wPct: 88,
+        hPct: 7,
+        fontFamily,
+        fontSizePt: 13,
+        richHtml: `<p>${escapeHtmlText(result.subtitle)}</p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.subtitle, fontSizePt: 13, color: secondaryText }],
+          },
+        ],
+        zIndex: nextZ++,
+      });
+    }
+    const startY = result.subtitle ? 29 : 23.5;
+    contentBox = { x: 5, y: startY, w: 90, h: 94 - startY };
+  } else if (visualStyle === 'editorial-hero') {
+    const idxLabel = String(slideIndex).padStart(2, '0');
+    builtElements.push(
+      {
+        id: `ai-ed-num-${now}`,
+        type: 'text',
+        xPct: 5,
+        yPct: 5,
+        wPct: 13,
+        hPct: 16,
+        fontFamily,
+        fontSizePt: 34,
+        richHtml: `<p><strong style="color:${accent}">${idxLabel}</strong></p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: idxLabel, bold: true, fontSizePt: 34, color: accent }],
+          },
+        ],
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-title-${now}`,
+        type: 'text',
+        isTitle: true,
+        xPct: 19,
+        yPct: 6.5,
+        wPct: 75,
+        hPct: 13,
+        fontFamily,
+        fontSizePt: 25,
+        richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.title, bold: true, fontSizePt: 25, color: primaryText }],
+          },
+        ],
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-ed-rule-${now}`,
+        type: 'shape',
+        shapeKind: 'rect',
+        xPct: 5,
+        yPct: 22.5,
+        wPct: 90,
+        hPct: 0.6,
+        fillColor: isDarkBg ? 'rgba(148,163,184,0.35)' : '#CBD5E1',
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-ed-accent-rule-${now}`,
+        type: 'shape',
+        shapeKind: 'rect',
+        xPct: 5,
+        yPct: 22.2,
+        wPct: 22,
+        hPct: 1.2,
+        fillColor: accent,
+        zIndex: nextZ++,
+      },
+    );
+    if (result.subtitle) {
+      builtElements.push({
+        id: `ai-sub-${now}`,
+        type: 'text',
+        xPct: 19,
+        yPct: 16.5,
+        wPct: 75,
+        hPct: 5.5,
+        fontFamily,
+        fontSizePt: 12.5,
+        richHtml: `<p>${escapeHtmlText(result.subtitle)}</p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.subtitle, fontSizePt: 12.5, color: secondaryText }],
+          },
+        ],
+        zIndex: nextZ++,
+      });
+    }
+    contentBox = { x: 5, y: 27, w: 90, h: 66 };
+  } else if (visualStyle === 'diagonal-band') {
+    builtElements.push(
+      {
+        id: `ai-diag-strip-${now}`,
+        type: 'shape',
+        shapeKind: 'rect',
+        xPct: 72,
+        yPct: -14,
+        wPct: 38,
+        hPct: 48,
+        fillColor: accent,
+        opacity: 0.16,
+        rotationDeg: -14,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-diag-pill-${now}`,
+        type: 'shape',
+        shapeKind: 'rect',
+        xPct: 0,
+        yPct: 0,
+        wPct: 2.2,
+        hPct: 100,
+        fillColor: accent,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-diag-pill2-${now}`,
+        type: 'shape',
+        shapeKind: 'rect',
+        xPct: 2.2,
+        yPct: 0,
+        wPct: 0.8,
+        hPct: 100,
+        fillColor: secondaryAccent,
+        opacity: 0.7,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-title-${now}`,
+        type: 'text',
+        isTitle: true,
+        xPct: 7,
+        yPct: 6.5,
+        wPct: 82,
+        hPct: 13,
+        fontFamily,
+        fontSizePt: 26,
+        richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.title, bold: true, fontSizePt: 26, color: primaryText }],
+          },
+        ],
+        zIndex: nextZ++,
+      },
+    );
+    if (result.subtitle) {
+      builtElements.push({
+        id: `ai-sub-${now}`,
+        type: 'text',
+        xPct: 7,
+        yPct: 19,
+        wPct: 80,
+        hPct: 7.5,
+        fontFamily,
+        fontSizePt: 13.5,
+        richHtml: `<p>${escapeHtmlText(result.subtitle)}</p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.subtitle, fontSizePt: 13.5, color: secondaryText }],
+          },
+        ],
+        zIndex: nextZ++,
+      });
+    }
+    const startY = result.subtitle ? 29 : 23;
+    contentBox = { x: 7, y: startY, w: 87, h: 93 - startY };
+  } else if (visualStyle === 'split-right') {
+    builtElements.push(
+      {
+        id: `ai-sr-panel-${now}`,
+        type: 'shape',
+        shapeKind: 'rect',
+        xPct: 66,
+        yPct: 0,
+        wPct: 34,
+        hPct: 100,
+        fillColor: accent,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-sr-accent-${now}`,
+        type: 'shape',
+        shapeKind: 'roundRect',
+        xPct: 70,
+        yPct: 82,
+        wPct: 14,
+        hPct: 2.2,
+        fillColor: secondaryAccent,
+        borderRadiusPx: 99,
+        zIndex: nextZ++,
+      },
+      {
+        id: `ai-title-${now}`,
+        type: 'text',
+        isTitle: true,
+        xPct: 69.5,
+        yPct: 14,
+        wPct: 27,
+        hPct: 34,
+        fontFamily,
+        fontSizePt: 23,
+        richHtml: `<p><strong>${escapeHtmlText(result.title)}</strong></p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.title, bold: true, fontSizePt: 23, color: onAccentText }],
+          },
+        ],
+        zIndex: nextZ++,
+      },
+    );
+    if (result.subtitle) {
+      builtElements.push({
+        id: `ai-sub-${now}`,
+        type: 'text',
+        xPct: 69.5,
+        yPct: 49,
+        wPct: 27,
+        hPct: 26,
+        fontFamily,
+        fontSizePt: 13,
+        richHtml: `<p>${escapeHtmlText(result.subtitle)}</p>`,
+        paragraphs: [
+          {
+            align: 'left',
+            runs: [{ text: result.subtitle, fontSizePt: 13, color: onAccentSub }],
+          },
+        ],
+        zIndex: nextZ++,
+      });
+    }
+    contentBox = { x: 5, y: 10, w: 57, h: 80 };
   } else {
     // top-bar
     builtElements.push(
@@ -1067,8 +1563,14 @@ export function buildWpsSlideFromAiProposal(
   } else if (result.layoutType === 'cards') {
     const cards = safeBullets.slice(0, 4);
     const isNarrowPanel = contentBox.w < 64;
-    const cols =
-      isNarrowPanel && cards.length <= 3
+    const useBentoAsymmetric =
+      visualStyle === 'bento-grid' && !isNarrowPanel && cards.length >= 3;
+    const useEditorialStrips =
+      (visualStyle === 'editorial-hero' || visualStyle === 'split-right') && cards.length <= 4;
+
+    const cols = useEditorialStrips
+      ? 1
+      : isNarrowPanel && cards.length <= 3
         ? 1
         : cards.length === 3 && !isNarrowPanel
           ? 3
@@ -1076,25 +1578,84 @@ export function buildWpsSlideFromAiProposal(
             ? cards.length
             : 2;
     const rowsCount = Math.ceil(cards.length / cols);
-    const gapX = 2.5;
-    const gapY = 3.5;
-    const cardW = (contentBox.w - gapX * (cols - 1)) / cols;
-    const cardH = Math.min(
+    const gapX = 2.6;
+    const gapY = useEditorialStrips ? 2.4 : 3.4;
+    const defaultCardW = (contentBox.w - gapX * (cols - 1)) / cols;
+    const defaultCardH = Math.min(
       rowsCount === 1 ? contentBox.h : (contentBox.h - gapY * (rowsCount - 1)) / rowsCount,
-      54,
+      useEditorialStrips ? 21 : 54,
     );
 
     cards.forEach((txt, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = contentBox.x + col * (cardW + gapX);
-      const y = contentBox.y + row * (cardH + gapY);
+      let x: number;
+      let y: number;
+      let cardW: number;
+      let cardH: number;
+      let isHeroBento = false;
+
+      if (useBentoAsymmetric) {
+        if (idx === 0) {
+          // Tall focal hero bento card on left
+          isHeroBento = true;
+          x = contentBox.x;
+          y = contentBox.y;
+          cardW = contentBox.w * 0.44;
+          cardH = Math.min(contentBox.h, 62);
+        } else {
+          const rightCount = cards.length - 1;
+          const rightIdx = idx - 1;
+          const rightGap = 2.6;
+          x = contentBox.x + contentBox.w * 0.44 + gapX;
+          cardW = contentBox.w * 0.56 - gapX;
+          cardH = (Math.min(contentBox.h, 62) - rightGap * (rightCount - 1)) / rightCount;
+          y = contentBox.y + rightIdx * (cardH + rightGap);
+        }
+      } else {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        x = contentBox.x + col * (defaultCardW + gapX);
+        y = contentBox.y + row * (defaultCardH + gapY);
+        cardW = defaultCardW;
+        cardH = defaultCardH;
+      }
+
       const cardBorder = idx % 2 === 1 ? secondaryAccent : accent;
-      const cardFontSize = cols === 3 || rowsCount >= 3 ? 13 : 14;
+      const cardFontSize = useEditorialStrips ? 13 : cols === 3 || rowsCount >= 3 ? 12.5 : 14;
       const colonIdx = txt.indexOf(':');
       const hasSplit = colonIdx > 1 && colonIdx < 48 && colonIdx < txt.length - 1;
       const cardTitle = hasSplit ? txt.slice(0, colonIdx).trim() : '';
       const cardBody = hasSplit ? txt.slice(colonIdx + 1).trim() : txt;
+      const numPrefix = `0${idx + 1}`;
+      const displayHead = hasSplit ? `${numPrefix} · ${cardTitle}` : `${numPrefix} · Clave`;
+
+      const cardFill = isHeroBento
+        ? accent
+        : isDarkBg
+          ? '#1E293B'
+          : '#F8FAFC';
+      const headColor = isHeroBento
+        ? onAccentText
+        : isDarkBg
+          ? primaryText
+          : cardBorder;
+      const bodyColor = isHeroBento ? onAccentSub : secondaryText;
+
+      if (!isHeroBento) {
+        builtElements.push({
+          id: `ai-card-bar-${now}-${idx}`,
+          type: 'shape',
+          shapeKind: 'roundRect',
+          xPct: Number((useEditorialStrips ? x : x + 1.4).toFixed(1)),
+          yPct: Number((useEditorialStrips ? y + 1.8 : y + 1.2).toFixed(1)),
+          wPct: Number(
+            (useEditorialStrips ? 1.1 : Math.max(6, Math.min(14, cardW * 0.28))).toFixed(1),
+          ),
+          hPct: Number((useEditorialStrips ? Math.max(6, cardH - 3.6) : 1.3).toFixed(1)),
+          fillColor: cardBorder,
+          borderRadiusPx: 99,
+          zIndex: nextZ + cards.length + idx + 1,
+        });
+      }
 
       builtElements.push({
         id: `ai-card-${now}-${idx}`,
@@ -1103,26 +1664,26 @@ export function buildWpsSlideFromAiProposal(
         yPct: Number(y.toFixed(1)),
         wPct: Number(cardW.toFixed(1)),
         hPct: Number(cardH.toFixed(1)),
-        fillColor: isDarkBg ? '#1E293B' : '#F8FAFC',
-        borderColor: cardBorder,
-        borderWidthPx: 1.5,
-        borderRadiusPx: 14,
-        shadow: 'soft',
+        fillColor: cardFill,
+        borderColor: isHeroBento ? accent : cardBorder,
+        borderWidthPx: isHeroBento ? 0 : 1.5,
+        borderRadiusPx: isHeroBento ? 18 : 14,
+        shadow: isHeroBento ? 'elevated' : 'soft',
         fontFamily,
         fontSizePt: cardFontSize,
         richHtml: hasSplit
-          ? `<p><strong>${escapeHtmlText(cardTitle)}</strong></p><p>${escapeHtmlText(cardBody)}</p>`
-          : `<p>${escapeHtmlText(txt)}</p>`,
+          ? `<p><strong style="color:${headColor}">${escapeHtmlText(displayHead)}</strong></p><p>${escapeHtmlText(cardBody)}</p>`
+          : `<p><strong style="color:${headColor}">${numPrefix}</strong></p><p>${escapeHtmlText(txt)}</p>`,
         paragraphs: hasSplit
           ? [
               {
                 align: 'left',
                 runs: [
                   {
-                    text: cardTitle,
+                    text: displayHead,
                     bold: true,
-                    fontSizePt: cardFontSize + 1,
-                    color: primaryText,
+                    fontSizePt: isHeroBento ? cardFontSize + 3 : cardFontSize + 1,
+                    color: headColor,
                   },
                 ],
               },
@@ -1131,8 +1692,8 @@ export function buildWpsSlideFromAiProposal(
                 runs: [
                   {
                     text: cardBody,
-                    fontSizePt: Math.max(11, cardFontSize - 1),
-                    color: secondaryText,
+                    fontSizePt: Math.max(11, isHeroBento ? cardFontSize : cardFontSize - 1),
+                    color: bodyColor,
                   },
                 ],
               },
@@ -1142,9 +1703,20 @@ export function buildWpsSlideFromAiProposal(
                 align: 'left',
                 runs: [
                   {
+                    text: numPrefix,
+                    bold: true,
+                    fontSizePt: isHeroBento ? 14 : 11,
+                    color: headColor,
+                  },
+                ],
+              },
+              {
+                align: 'left',
+                runs: [
+                  {
                     text: txt,
                     fontSizePt: cardFontSize,
-                    color: primaryText,
+                    color: isHeroBento ? onAccentText : primaryText,
                   },
                 ],
               },
@@ -1152,6 +1724,7 @@ export function buildWpsSlideFromAiProposal(
         zIndex: nextZ++,
       });
     });
+    nextZ += cards.length + 1;
   } else {
     const bulletHtml = `<ul>${safeBullets
       .map((b) => `<li>${escapeHtmlText(b)}</li>`)
@@ -1163,8 +1736,12 @@ export function buildWpsSlideFromAiProposal(
       yPct: contentBox.y,
       wPct: contentBox.w,
       hPct: contentBox.h,
+      fillColor: isDarkBg ? 'rgba(30, 41, 59, 0.52)' : 'rgba(248, 250, 252, 0.85)',
+      borderColor: isDarkBg ? 'rgba(148, 163, 184, 0.25)' : '#E2E8F0',
+      borderWidthPx: 1,
+      borderRadiusPx: 14,
       fontFamily,
-      fontSizePt: contentBox.w < 64 ? 14 : 16,
+      fontSizePt: contentBox.w < 64 ? 14 : 15.5,
       richHtml: bulletHtml,
       paragraphs: safeBullets.map((b) => ({
         align: 'left' as const,
@@ -1172,7 +1749,7 @@ export function buildWpsSlideFromAiProposal(
         runs: [
           {
             text: b,
-            fontSizePt: contentBox.w < 64 ? 14 : 16,
+            fontSizePt: contentBox.w < 64 ? 14 : 15.5,
             color: primaryText,
           },
         ],

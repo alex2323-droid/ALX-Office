@@ -19,7 +19,7 @@ function initFirestore(): Firestore {
     return initializeFirestore(
       app,
       {
-        ...(typeof window !== 'undefined' ? { experimentalForceLongPolling: true } : {}),
+        experimentalAutoDetectLongPolling: true,
         ignoreUndefinedProperties: true,
       },
       firebaseConfig.firestoreDatabaseId,

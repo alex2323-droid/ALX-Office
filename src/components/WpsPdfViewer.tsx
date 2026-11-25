@@ -1343,6 +1343,8 @@ export default function WpsPdfViewer({
   const [zoomPercent, setZoomPercent] = useState(100);
   const [nightReading, setNightReading] = useState(false);
   const [sepiaReading, setSepiaReading] = useState(false);
+  const [printViewMode, setPrintViewMode] = useState(false);
+  const [printPaperScale, setPrintPaperScale] = useState<'fit' | 'actual'>('fit');
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -1463,6 +1465,7 @@ export default function WpsPdfViewer({
     setCurrentPage(1);
     setEditNotice(null);
     setEditMode(false);
+    setPrintViewMode(false);
     setEditSubMode('text');
     setDrawerOpen(false);
     setPageHtmls({});
@@ -2521,6 +2524,68 @@ export default function WpsPdfViewer({
     onBack();
   };
 
+  const triggerBrowserPrint = useCallback(() => {
+    history.commitPending();
+    hideSoftKeyboard();
+    setDrawerOpen(false);
+    setSpellMenu(null);
+    setSelectedId(null);
+    const previousTitle = window.document.title;
+    window.document.title = doc.title?.trim() || 'ALX Office PDF';
+    const restoreTitle = () => {
+      window.document.title = previousTitle;
+      window.removeEventListener('afterprint', restoreTitle);
+    };
+    window.addEventListener('afterprint', restoreTitle);
+    window.print();
+    window.setTimeout(() => {
+      window.document.title = previousTitle;
+    }, 1000);
+  }, [doc.title, history]);
+
+  const handleEnterPrintView = async (autoPrint = false) => {
+    if (isApplyingEdits) return;
+    history.commitPending();
+    setDrawerOpen(false);
+    setSearchOpen(false);
+    setThumbsOpen(false);
+    setSpellMenu(null);
+
+    if (!editMode && !autoPrint) {
+      await ensurePerPageHtmlLoaded();
+      setEditMode(true);
+    }
+
+    setViewMode('continuous');
+    setPrintViewMode(true);
+
+    if (autoPrint) {
+      hideSoftKeyboard();
+      window.setTimeout(() => {
+        triggerBrowserPrint();
+      }, 220);
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && printViewMode) {
+        setPrintViewMode(false);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        if (!printViewMode) {
+          void handleEnterPrintView(false);
+        } else {
+          triggerBrowserPrint();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   const jumpToPage = (pageNum: number) => {
     const bounded = Math.max(1, Math.min(numPages || 1, pageNum));
     suppressScrollSyncUntilRef.current = Date.now() + 550;
@@ -2539,7 +2604,12 @@ export default function WpsPdfViewer({
     viewportWidth < 640
       ? Math.min(0.62, Math.max(0.45, (viewportWidth - 28) / 612))
       : 1.05;
-  const scale = (zoomPercent / 100) * baseScaleFactor;
+  const effectiveZoom = printViewMode
+    ? printPaperScale === 'actual'
+      ? 115
+      : 100
+    : zoomPercent;
+  const scale = (effectiveZoom / 100) * baseScaleFactor;
 
   const toolColor = activeTool === 'highlight' ? highlightColor : activeColor;
   const paletteForTool =
@@ -2547,8 +2617,158 @@ export default function WpsPdfViewer({
   const hasPendingSaves = textDirty || draftAnnotations.length > 0;
 
   return (
-    <div className="wps-print-root flex h-dvh flex-col overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div
+      className={`wps-print-root flex h-dvh flex-col overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100 ${
+        printViewMode ? 'alx-print-view' : ''
+      }`}
+    >
       {/* Compact Sticky Top Bar (52px) */}
+      {printViewMode ? (
+        <header className="no-print sticky top-0 z-30 flex min-h-[52px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-1.5 backdrop-blur-md sm:px-5 dark:border-slate-800 dark:bg-slate-900/95">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPrintViewMode(false)}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Volver al editor PDF</span>
+            </button>
+            <div className="min-w-0">
+              <div className="truncate font-display text-xs font-semibold text-slate-900 sm:text-sm dark:text-slate-100">
+                Vista de impresión PDF · {doc.title}
+              </div>
+              <div className="hidden font-mono text-[11px] text-slate-500 sm:block dark:text-slate-400">
+                {numPages} {numPages === 1 ? 'página lista' : 'páginas listas'} para impresión · Sin filtros de lectura
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+              <button
+                type="button"
+                onClick={() => setPrintPaperScale('fit')}
+                className={`min-h-[32px] rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                  printPaperScale === 'fit'
+                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-700 dark:text-white'
+                    : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                Ajustar hoja
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintPaperScale('actual')}
+                className={`min-h-[32px] rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                  printPaperScale === 'actual'
+                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-700 dark:text-white'
+                    : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                Tamaño 100%
+              </button>
+            </div>
+
+            {(editMode || history.canUndo || history.canRedo) && (
+              <>
+                <button
+                  type="button"
+                  disabled={!history.canUndo || isApplyingEdits}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleUndo}
+                  aria-label="Deshacer"
+                  title="Deshacer cambio"
+                  className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-35 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={!history.canRedo || isApplyingEdits}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleRedo}
+                  aria-label="Rehacer"
+                  title="Rehacer cambio"
+                  className="hidden min-h-[36px] min-w-[36px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-35 sm:flex dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+
+            {hasPendingSaves && (
+              <button
+                type="button"
+                disabled={isApplyingEdits}
+                onClick={() => void handleSavePdfEdits()}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-emerald-600 px-2.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap shrink-0"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Guardar</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleOpenAiAssistant}
+              disabled={isApplyingEdits || isExtractingPages || (!pdfDoc && loading)}
+              className="inline-flex min-h-[36px] items-center gap-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 text-xs font-semibold text-white shadow-2xs transition-opacity hover:opacity-95 disabled:opacity-50 whitespace-nowrap shrink-0"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>IA</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isApplyingEdits || isExtractingPages || (!pdfDoc && loading)}
+              onClick={() => void handleToggleEditMode()}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold transition-colors disabled:opacity-50 whitespace-nowrap shrink-0 ${
+                editMode
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+              }`}
+            >
+              {isExtractingPages ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Abriendo...</span>
+                </>
+              ) : editMode ? (
+                <>
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span>Editando en hoja</span>
+                </>
+              ) : (
+                <>
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span>Editar en hoja</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={isApplyingEdits}
+              onClick={() => void handleDownloadPdf()}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Descargar PDF</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={triggerBrowserPrint}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#EA3D2F] px-3.5 text-xs font-semibold text-white hover:bg-[#D63124] whitespace-nowrap shrink-0"
+            >
+              <Printer className="h-4 w-4" />
+              <span>Imprimir ahora</span>
+            </button>
+          </div>
+        </header>
+      ) : (
       <header className="no-print sticky top-0 z-30 flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <button
@@ -2717,11 +2937,13 @@ export default function WpsPdfViewer({
 
           <button
             type="button"
-            onClick={() => window.print()}
-            aria-label="Imprimir PDF"
-            className="hidden min-h-[44px] min-w-[38px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:flex dark:text-slate-300 dark:hover:bg-slate-800"
+            onClick={() => void handleEnterPrintView(false)}
+            aria-label="Modo vista de impresión PDF"
+            title="Vista de impresión PDF e imprimir"
+            className="inline-flex min-h-[44px] min-w-[38px] lg:px-2.5 items-center justify-center gap-1.5 rounded-xl text-slate-600 hover:bg-slate-100 whitespace-nowrap shrink-0 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            <Printer className="h-4 w-4" />
+            <Printer className="h-4 w-4 shrink-0" />
+            <span className="hidden lg:inline text-xs font-medium">Vista impresión</span>
           </button>
 
           <button
@@ -2778,6 +3000,7 @@ export default function WpsPdfViewer({
           </button>
         </div>
       </header>
+      )}
 
       {/* Compact PDF Mode Strip (Texto Word vs Anotar + Paginación) */}
       {editMode && (
@@ -3099,7 +3322,7 @@ export default function WpsPdfViewer({
 
       {/* Split Body: Thumbnail Sidebar + Main PDF Pages Viewport */}
       <div className="wps-print-body flex min-h-0 flex-1 overflow-hidden pb-[48px]">
-        {pdfDoc && !errorMsg && (
+        {pdfDoc && !errorMsg && !printViewMode && (
           <PdfThumbnailSidebar
             pdfDoc={pdfDoc}
             numPages={numPages}
@@ -3149,14 +3372,14 @@ export default function WpsPdfViewer({
                 </div>
               )}
 
-              {viewMode === 'single' ? (
+              {viewMode === 'single' && !printViewMode ? (
                 <div id={`wps-pdf-page-${currentPage}`} data-pdf-page={currentPage}>
                   <PdfEditablePage
                     pdfDoc={pdfDoc}
                     pageNumber={currentPage}
                     scale={scale}
-                    nightFilter={nightReading}
-                    sepiaFilter={sepiaReading}
+                    nightFilter={nightReading && !printViewMode}
+                    sepiaFilter={sepiaReading && !printViewMode}
                     editMode={editMode}
                     editSubMode={editSubMode}
                     pageHtml={pageHtmls[currentPage] ?? '<p></p>'}
@@ -3191,17 +3414,21 @@ export default function WpsPdfViewer({
                       key={pageNum}
                       id={`wps-pdf-page-${pageNum}`}
                       data-pdf-page={pageNum}
-                      className="space-y-1.5"
+                      className="wps-pdf-print-page space-y-1.5"
                     >
                       <div className="no-print text-center font-mono text-[11px] tabular-nums text-slate-400">
-                        Página {pageNum} / {numPages}
+                        {printViewMode
+                          ? `Hoja ${pageNum} de ${numPages} · ${
+                              editMode ? 'Edición activa en vista de impresión' : 'Vista previa de impresión'
+                            }`
+                          : `Página ${pageNum} / ${numPages}`}
                       </div>
                       <PdfEditablePage
                         pdfDoc={pdfDoc}
                         pageNumber={pageNum}
                         scale={scale}
-                        nightFilter={nightReading}
-                        sepiaFilter={sepiaReading}
+                        nightFilter={nightReading && !printViewMode}
+                        sepiaFilter={sepiaReading && !printViewMode}
                         editMode={editMode}
                         editSubMode={editSubMode}
                         pageHtml={pageHtmls[pageNum] ?? '<p></p>'}
@@ -4082,6 +4309,14 @@ export default function WpsPdfViewer({
                     <PanelLeft className="h-3.5 w-3.5" />
                     <span>Miniaturas</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleEnterPrintView(false)}
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-medium text-[#EA3D2F] hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    <span>Vista impresión</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -4103,11 +4338,19 @@ export default function WpsPdfViewer({
                 </button>
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => void handleEnterPrintView(false)}
                   className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
-                  <Printer className="h-4 w-4 text-blue-600" />
-                  <span>Imprimir</span>
+                  <Eye className="h-4 w-4 text-violet-600" />
+                  <span>Vista de impresión</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleEnterPrintView(true)}
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-semibold text-[#EA3D2F] hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>Imprimir directo</span>
                 </button>
                 <button
                   type="button"
@@ -4115,16 +4358,16 @@ export default function WpsPdfViewer({
                     setDrawerOpen(false);
                     setThumbsOpen(true);
                   }}
-                  className="col-span-2 flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   <Grid className="h-4 w-4 text-emerald-600" />
-                  <span>Organizar páginas ({numPages})</span>
+                  <span>Organizar ({numPages})</span>
                 </button>
               </div>
             </div>
           }
         />
-      ) : (
+      ) : !printViewMode ? (
         <footer className="no-print fixed bottom-0 left-0 right-0 z-30 flex h-[48px] items-center justify-between gap-2 border-t border-slate-200 bg-white/95 px-2 backdrop-blur-md sm:px-4 dark:border-slate-800 dark:bg-slate-900/95">
           <div className="flex items-center gap-1">
             <button
@@ -4191,6 +4434,16 @@ export default function WpsPdfViewer({
 
             <button
               type="button"
+              onClick={() => void handleEnterPrintView(false)}
+              aria-label="Modo vista de impresión PDF"
+              title="Vista de impresión"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Printer className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setZoomPercent((z) => Math.max(75, z - 15))}
               aria-label="Alejar zoom"
               className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -4210,7 +4463,7 @@ export default function WpsPdfViewer({
             </button>
           </div>
         </footer>
-      )}
+      ) : null}
 
       <AiEditAssistantModal
         open={aiModalOpen}

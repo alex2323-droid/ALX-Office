@@ -1,4 +1,4 @@
-import { isNativeCapacitorApp } from './googleAuth';
+import { isNativeCapacitorApp } from './platform';
 
 export interface AiDocumentDesignContext {
   pageBgColor?: string;
@@ -23,6 +23,15 @@ export type AiTeamModelOption =
   | 'qwen'
   | 'gpt-20b';
 
+export type AiWorkTaskType =
+  | 'quick-edit'
+  | 'document-edit'
+  | 'document-create'
+  | 'presentation-design'
+  | 'pdf-analysis';
+
+export type AiEfficiencyMode = 'auto' | 'low-token' | 'quality';
+
 export interface AiDocumentEditRequest {
   action: string;
   customPrompt?: string;
@@ -32,6 +41,7 @@ export interface AiDocumentEditRequest {
   documentTitle: string;
   fileType: string;
   preferredModel?: AiTeamModelOption;
+  efficiencyMode?: AiEfficiencyMode;
   designContext?: AiDocumentDesignContext;
 }
 
@@ -43,6 +53,8 @@ export interface AiDocumentEditResponse {
   suggestedFontFamily?: 'sans' | 'serif' | 'mono';
   modelUsed?: string;
   teamRole?: string;
+  taskProfile?: string;
+  efficiencyMode?: AiEfficiencyMode;
 }
 
 export interface AiSlideDesignContext {
@@ -58,8 +70,12 @@ export type SlideVisualStyle =
   | 'sidebar-left'
   | 'header-banner'
   | 'split-left'
+  | 'split-right'
   | 'minimal-frame'
-  | 'spotlight';
+  | 'spotlight'
+  | 'bento-grid'
+  | 'editorial-hero'
+  | 'diagonal-band';
 
 export type SlideImageMode = 'none' | 'search' | 'generate';
 
@@ -98,6 +114,7 @@ export interface AiSlideEditRequest {
   slideTexts?: string[];
   presentationTitle: string;
   preferredModel?: AiTeamModelOption;
+  efficiencyMode?: AiEfficiencyMode;
   slideContext?: AiSlideDesignContext;
   imageMode?: SlideImageMode;
   preserveContent?: boolean;
@@ -105,6 +122,8 @@ export interface AiSlideEditRequest {
   variationHint?: {
     avoidLayout?: string;
     avoidVisualStyle?: string;
+    avoidLayouts?: string[];
+    avoidVisualStyles?: string[];
     iteration?: number;
   };
 }
@@ -133,6 +152,8 @@ export interface AiSlideEditResponse {
   summary: string;
   modelUsed?: string;
   teamRole?: string;
+  taskProfile?: string;
+  efficiencyMode?: AiEfficiencyMode;
 }
 
 export interface AiPdfAssistRequest {
@@ -144,6 +165,7 @@ export interface AiPdfAssistRequest {
   totalPages: number;
   documentTitle: string;
   preferredModel?: AiTeamModelOption;
+  efficiencyMode?: AiEfficiencyMode;
 }
 
 export interface AiPdfAssistResponse {
@@ -153,6 +175,8 @@ export interface AiPdfAssistResponse {
   summary: string;
   modelUsed?: string;
   teamRole?: string;
+  taskProfile?: string;
+  efficiencyMode?: AiEfficiencyMode;
 }
 
 export interface AiCreateDocumentRequest {
@@ -164,8 +188,11 @@ export interface AiCreateDocumentRequest {
   fontStyle?: string;
   sectionCount?: number;
   preferredModel?: AiTeamModelOption;
+  efficiencyMode?: AiEfficiencyMode;
   imageMode?: SlideImageMode;
   qaAnswers?: SlideQuestionAnswer[];
+  tokenMode?: 'standard' | 'low-token';
+  freellmapiEndpoint?: string;
 }
 
 export interface AiCreateDocumentResponse {
@@ -180,6 +207,10 @@ export interface AiCreateDocumentResponse {
   slides?: AiSlideEditResponse[];
   modelUsed?: string;
   teamRole?: string;
+  taskProfile?: string;
+  efficiencyMode?: AiEfficiencyMode;
+  tokenMode?: 'standard' | 'low-token';
+  endpointUsed?: string;
 }
 
 export interface AiTranscribeAudioRequest {

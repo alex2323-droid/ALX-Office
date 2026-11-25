@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { WifiOff } from 'lucide-react';
 import AiCreateDocumentModal from './components/AiCreateDocumentModal';
+import AuthModal, { AuthModalMode } from './components/AuthModal';
 import DonationModal, { SupportModalTab } from './components/DonationModal';
 import WpsEditorView from './components/WpsEditorView';
 import WpsHomeView, { HomeTab } from './components/WpsHomeView';
@@ -30,18 +31,10 @@ import {
   upsertCloudDocument,
 } from './lib/firebaseSync';
 import {
-  formatGoogleAuthError,
-  getAccessToken,
-  googleSignIn,
-  initAuth,
-  logout,
+  getAccountUsername,
+  logoutAccount,
   subscribeFirebaseAuth,
-} from './lib/googleAuth';
-import {
-  downloadPickedDriveFile,
-  openGoogleDrivePicker,
-  uploadDocumentCopyToDrive,
-} from './lib/googlePicker';
+} from './lib/auth';
 
 const THEME_STORAGE_KEY = 'alx_office_theme_v1';
 
@@ -97,15 +90,9 @@ export default function App() {
   const syncTimersRef = useRef<Map<string, number>>(new Map());
   const documentsRef = useRef<WpsDocument[]>(documents);
 
-  // Google Workspace Auth & Picker state
-  const [needsAuth, setNeedsAuth] = useState(true);
-  const [googleUser, setGoogleUser] = useState<User | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isPickerBusy, setIsPickerBusy] = useState(false);
-  const [pendingDriveUploadDoc, setPendingDriveUploadDoc] = useState<WpsDocument | null>(
-    null,
-  );
-  const [isUploadingDrive, setIsUploadingDrive] = useState(false);
+  // Account Auth Modal state
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode>('login');
   const [aiCreateOpen, setAiCreateOpen] = useState(false);
   const [aiCreateFormat, setAiCreateFormat] = useState<'DOCX' | 'PPTX' | 'PDF'>('DOCX');
   const [donationModalOpen, setDonationModalOpen] = useState(false);
@@ -126,19 +113,8 @@ export default function App() {
         cloudSeededUidRef.current = null;
       }
     });
-    const unsubscribe = initAuth(
-      (user) => {
-        setGoogleUser(user);
-        setNeedsAuth(false);
-      },
-      () => {
-        setGoogleUser(null);
-        setNeedsAuth(true);
-      },
-    );
     return () => {
       unsubFirebase();
-      unsubscribe();
     };
   }, []);
 
@@ -153,7 +129,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!isFirebaseAuthReady || !firebaseUser || !firebaseUser.emailVerified || !isOnline) {
+    if (!isFirebaseAuthReady || !firebaseUser || !isOnline) {
       return;
     }
 
@@ -291,7 +267,7 @@ export default function App() {
   const activeDoc = documents.find((d) => d.id === activeDocId) ?? null;
 
   const scheduleCloudUpsert = (docToSync: WpsDocument, immediate = false) => {
-    if (!firebaseUser || !firebaseUser.emailVerified || !cloudProfileReady || !isOnline) {
+    if (!firebaseUser || !cloudProfileReady || !isOnline) {
       return;
     }
     const uid = firebaseUser.uid;
@@ -419,7 +395,6 @@ export default function App() {
     }
     if (
       firebaseUser &&
-      firebaseUser.emailVerified &&
       cloudProfileReady &&
       isOnline &&
       cloudDocIdsRef.current.has(key)
@@ -562,140 +537,12 @@ export default function App() {
     };
   }, []);
 
-  const handleGoogleLogin = async () => {
-    if (!isOnline) {
-      setStatusNotice({
-        kind: 'error',
-        text: 'Sin conexión a internet. Puedes seguir trabajando con tus documentos locales en caché.',
-      });
-      return;
-    }
-    setStatusNotice(null);
-    setIsLoggingIn(true);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setGoogleUser(result.user);
-        setNeedsAuth(false);
-      }
-    } catch (err) {
-      setStatusNotice({
-        kind: 'error',
-        text: formatGoogleAuthError(err),
-      });
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleGoogleLogout = async () => {
-    await logout();
-    setGoogleUser(null);
-    setNeedsAuth(true);
-  };
-
-  const handleOpenGooglePicker = async () => {
-    if (!isOnline) {
-      setStatusNotice({
-        kind: 'error',
-        text: 'Sin conexión a internet. Google Drive requiere conexión; tus documentos locales siguen disponibles.',
-      });
-      return;
-    }
-    setStatusNotice(null);
-    let token = await getAccessToken();
-    if (!token) {
-      setNeedsAuth(true);
-      try {
-        setIsLoggingIn(true);
-        const result = await googleSignIn();
-        if (!result) return;
-        setGoogleUser(result.user);
-        setNeedsAuth(false);
-        token = result.accessToken;
-      } catch (err) {
-        setStatusNotice({
-          kind: 'error',
-          text: formatGoogleAuthError(err),
-        });
-        return;
-      } finally {
-        setIsLoggingIn(false);
-      }
-    }
-
-    setIsPickerBusy(true);
-    try {
-      const picked = await openGoogleDrivePicker(token);
-      if (!picked) return;
-      const driveFile = await downloadPickedDriveFile(token, picked);
-      const imported = await parseUploadedOfficeFile(driveFile);
-      imported.folder = 'Google Drive';
-      docsDirtyRef.current = true;
-      const nextDocs = [imported, ...documentsRef.current];
-      documentsRef.current = nextDocs;
-      setDocuments(nextDocs);
-      setActiveDocId(imported.id);
-      scheduleCloudUpsert(imported, true);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al abrir archivo de Drive.';
-      if (msg.includes('401')) {
-        setNeedsAuth(true);
-      }
-      setStatusNotice({
-        kind: 'error',
-        text: msg,
-      });
-    } finally {
-      setIsPickerBusy(false);
-    }
-  };
-
-  const handleConfirmDriveUpload = async () => {
-    if (!pendingDriveUploadDoc) return;
-    if (!isOnline) {
-      setPendingDriveUploadDoc(null);
-      setStatusNotice({
-        kind: 'error',
-        text: 'Sin conexión a internet. Tu documento permanece guardado localmente en caché.',
-      });
-      return;
-    }
-    const token = await getAccessToken();
-    if (!token) {
-      setPendingDriveUploadDoc(null);
-      setNeedsAuth(true);
-      setStatusNotice({
-        kind: 'error',
-        text: 'Tu sesión de Google expiró. Inicia sesión nuevamente para guardar en Drive.',
-      });
-      return;
-    }
-
-    setIsUploadingDrive(true);
-    try {
-      const created = await uploadDocumentCopyToDrive(
-        token,
-        pendingDriveUploadDoc.title,
-        pendingDriveUploadDoc.contentHtml,
-      );
-      setPendingDriveUploadDoc(null);
-      setStatusNotice({
-        kind: 'success',
-        text: `Copia guardada en Google Drive como "${created.name}".`,
-      });
-    } catch (err) {
-      setPendingDriveUploadDoc(null);
-      setStatusNotice({
-        kind: 'error',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'No se pudo subir el archivo a Google Drive.',
-      });
-    } finally {
-      setIsUploadingDrive(false);
-    }
+  const handleAccountLogout = async () => {
+    await logoutAccount();
+    setStatusNotice({
+      kind: 'success',
+      text: 'Sesión cerrada. Tus documentos locales permanecen disponibles en este dispositivo.',
+    });
   };
 
   const offlineBanner = !isOnline ? (
@@ -773,48 +620,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Confirmation Modal for Uploading/Creating File Copy in Google Drive */}
-      {pendingDriveUploadDoc && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          onClick={() => !isUploadingDrive && setPendingDriveUploadDoc(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-display text-base font-semibold text-slate-900 dark:text-slate-100">
-              Guardar copia en Google Drive
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-              ¿Deseas subir una copia del documento{' '}
-              <strong className="text-slate-900 dark:text-slate-100">
-                "{pendingDriveUploadDoc.title}"
-              </strong>{' '}
-              en formato Word (.doc) a tu cuenta de Google Drive?
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={isUploadingDrive}
-                onClick={() => setPendingDriveUploadDoc(null)}
-                className="h-11 rounded-xl border border-slate-200 px-4 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={isUploadingDrive}
-                onClick={handleConfirmDriveUpload}
-                className="h-11 rounded-xl bg-[#EA3D2F] px-4 text-xs font-semibold text-white hover:bg-[#D63124] disabled:opacity-50"
-              >
-                {isUploadingDrive ? 'Guardando...' : 'Confirmar y guardar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <WpsHomeView
         documents={documents}
         activeTab={homeTab}
@@ -831,7 +636,7 @@ export default function App() {
         onToggleDarkMode={() => {
           setDarkMode((prev) => {
             const next = !prev;
-            if (firebaseUser && firebaseUser.emailVerified && cloudProfileReady && isOnline) {
+            if (firebaseUser && cloudProfileReady && isOnline) {
               void updateUserThemeInCloud(
                 firebaseUser.uid,
                 next ? 'dark' : 'light',
@@ -840,14 +645,14 @@ export default function App() {
             return next;
           });
         }}
-        needsGoogleAuth={needsAuth}
-        googleUserEmail={googleUser?.email || googleUser?.displayName || null}
-        isGoogleLoggingIn={isLoggingIn}
-        isPickerBusy={isPickerBusy}
-        onGoogleLogin={handleGoogleLogin}
-        onGoogleLogout={handleGoogleLogout}
-        onOpenGooglePicker={handleOpenGooglePicker}
-        onRequestSaveToDrive={(doc) => setPendingDriveUploadDoc(doc)}
+        accountUsername={getAccountUsername(firebaseUser)}
+        onOpenAuth={(mode) => {
+          setAuthModalMode(mode);
+          setAuthModalOpen(true);
+        }}
+        onLogout={() => {
+          void handleAccountLogout();
+        }}
         onOpenAiCreator={(format) => {
           setAiCreateFormat(format || 'DOCX');
           setAiCreateOpen(true);
@@ -855,6 +660,21 @@ export default function App() {
         onOpenDonations={(tab = 'support') => {
           setDonationModalTab(tab);
           setDonationModalOpen(true);
+        }}
+      />
+
+      <AuthModal
+        open={authModalOpen}
+        initialMode={authModalMode}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={(mode, username) => {
+          setStatusNotice({
+            kind: 'success',
+            text:
+              mode === 'register'
+                ? `¡Cuenta @${username} creada! Tus documentos se sincronizarán en la nube.`
+                : `¡Bienvenido de nuevo, @${username}!`,
+          });
         }}
       />
 

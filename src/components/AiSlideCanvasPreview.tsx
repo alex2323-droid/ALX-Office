@@ -141,6 +141,7 @@ export default function AiSlideCanvasPreview({
           }
 
           if (el.type === 'diagram') {
+            const visibleItems = el.items.slice(0, 6);
             return (
               <div
                 key={el.id}
@@ -151,21 +152,31 @@ export default function AiSlideCanvasPreview({
                   borderRadius: `${el.borderRadiusPx ?? 12}px`,
                   boxShadow: getShadowCss(el.shadow),
                 }}
-                className="flex flex-wrap items-center justify-center gap-3 overflow-hidden border p-4 text-slate-900"
+                className="flex flex-wrap items-center justify-center gap-2.5 overflow-hidden border p-4 text-slate-900"
               >
-                {el.items.slice(0, 6).map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{ borderColor: el.borderColor || '#CBD5E1' }}
-                    className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-xs"
-                  >
-                    <span
-                      style={{ backgroundColor: el.borderColor || '#7C3AED' }}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                {visibleItems.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2.5">
+                    <div
+                      style={{ borderColor: el.borderColor || '#CBD5E1' }}
+                      className="flex items-center gap-2 rounded-xl border bg-white px-3.5 py-2 text-sm font-semibold text-slate-800 shadow-xs"
                     >
-                      {idx + 1}
-                    </span>
-                    <span>{item}</span>
+                      <span
+                        style={{ backgroundColor: el.borderColor || '#7C3AED' }}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                      >
+                        {idx + 1}
+                      </span>
+                      <span className="max-w-[190px] leading-snug">{item}</span>
+                    </div>
+                    {idx < visibleItems.length - 1 && (
+                      <span
+                        aria-hidden="true"
+                        style={{ color: el.borderColor || '#7C3AED' }}
+                        className="text-base font-bold select-none"
+                      >
+                        →
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

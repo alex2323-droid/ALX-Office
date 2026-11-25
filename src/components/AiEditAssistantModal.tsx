@@ -23,6 +23,7 @@ import {
 import {
   AiDocumentDesignContext,
   AiDocumentEditResponse,
+  AiEfficiencyMode,
   AiPdfAssistResponse,
   AiSlideDesignContext,
   AiSlideEditResponse,
@@ -144,6 +145,8 @@ export default function AiEditAssistantModal({
   const [refinePrompt, setRefinePrompt] = useState('');
   const [lastAction, setLastAction] = useState('custom');
   const [slideVariationCount, setSlideVariationCount] = useState(0);
+  const [usedSlideVisualStyles, setUsedSlideVisualStyles] = useState<string[]>([]);
+  const [usedSlideLayouts, setUsedSlideLayouts] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [docViewTab, setDocViewTab] = useState<'preview' | 'compare'>('preview');
@@ -153,6 +156,7 @@ export default function AiEditAssistantModal({
 
   // Slide-specific controls: work mode (auto vs interactive questions), preserve content, opt-in image mode
   const [slideWorkMode, setSlideWorkMode] = useState<'auto' | 'questions'>('auto');
+  const [efficiencyMode, setEfficiencyMode] = useState<AiEfficiencyMode>('auto');
   const [preserveContent, setPreserveContent] = useState(true);
   const [imageMode, setImageMode] = useState<SlideImageMode>('none');
   const [questionsLoading, setQuestionsLoading] = useState(false);
@@ -166,6 +170,8 @@ export default function AiEditAssistantModal({
     setRefinePrompt('');
     setLastAction('custom');
     setSlideVariationCount(0);
+    setUsedSlideVisualStyles([]);
+    setUsedSlideLayouts([]);
     setLoading(false);
     setErrorMsg(null);
     setDocViewTab('preview');
@@ -173,6 +179,7 @@ export default function AiEditAssistantModal({
     setSlideResult(null);
     setPdfResult(null);
     setSlideWorkMode('auto');
+    setEfficiencyMode('auto');
     const hasMeaningfulContent =
       slideTexts.some((t) => t.trim().length > 0) ||
       (slideTitle.trim().length > 0 && !/^contenido$/i.test(slideTitle.trim()));
@@ -281,6 +288,7 @@ export default function AiEditAssistantModal({
           documentTitle,
           fileType,
           preferredModel: 'auto',
+          efficiencyMode,
           designContext: {
             pageBgColor,
             fontFamily,
@@ -290,6 +298,20 @@ export default function AiEditAssistantModal({
         setDocResult(res);
         setDocViewTab('preview');
       } else if (mode === 'slide') {
+        const nextAvoidStyles = Array.from(
+          new Set(
+            [...usedSlideVisualStyles, prevSlideResult?.visualStyle].filter(
+              (v): v is string => Boolean(v),
+            ),
+          ),
+        );
+        const nextAvoidLayouts = Array.from(
+          new Set(
+            [...usedSlideLayouts, prevSlideResult?.layoutType].filter(
+              (v): v is string => Boolean(v),
+            ),
+          ),
+        );
         const res = await requestAiSlideEdit({
           action: actionId,
           customPrompt: custom,
@@ -297,6 +319,7 @@ export default function AiEditAssistantModal({
           slideTexts,
           presentationTitle: documentTitle,
           preferredModel: 'auto',
+          efficiencyMode,
           slideContext,
           imageMode,
           preserveContent,
@@ -306,11 +329,23 @@ export default function AiEditAssistantModal({
               ? {
                   avoidLayout: prevSlideResult?.layoutType,
                   avoidVisualStyle: prevSlideResult?.visualStyle,
+                  avoidLayouts: nextAvoidLayouts,
+                  avoidVisualStyles: nextAvoidStyles,
                   iteration: nextIteration,
                 }
               : undefined,
         });
         setSlideResult(res);
+        if (res.visualStyle) {
+          setUsedSlideVisualStyles((prev) =>
+            prev.includes(res.visualStyle!) ? prev : [...prev.slice(-6), res.visualStyle!],
+          );
+        }
+        if (res.layoutType) {
+          setUsedSlideLayouts((prev) =>
+            prev.includes(res.layoutType) ? prev : [...prev.slice(-4), res.layoutType],
+          );
+        }
       } else {
         const res = await requestAiPdfAssist({
           action: actionId,
@@ -321,6 +356,7 @@ export default function AiEditAssistantModal({
           totalPages: pdfTotalPages,
           documentTitle,
           preferredModel: 'auto',
+          efficiencyMode,
         });
         setPdfResult(res);
       }
@@ -412,24 +448,52 @@ export default function AiEditAssistantModal({
             </div>
           )}
 
-          {/* Unified AI Collaborative Team Banner (Manual model list hidden) */}
-          <div className="flex items-center justify-between gap-2.5 rounded-2xl border border-violet-200/80 bg-violet-50/60 px-3.5 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/30">
+          {/* Task-Aware Collaborative AI Engine & Efficiency Selector */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-violet-200/80 bg-violet-50/60 px-3.5 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/30">
             <div className="flex min-w-0 items-center gap-2.5">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/15 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
                 <Users className="h-4 w-4" />
               </div>
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  Trabajo en Equipo IA Automático
+                  {mode === 'slide'
+                    ? 'Especialista Canva y Presentaciones'
+                    : mode === 'pdf-annotate'
+                      ? 'Especialista Analítico PDF'
+                      : 'Especialista Editorial de Documentos'}
                 </div>
                 <p className="truncate text-[10px] text-slate-600 dark:text-slate-400">
-                  Especialistas coordinados en texto, diseño visual e imágenes temáticas
+                  {mode === 'slide'
+                    ? 'Prioriza las mejores IA con razonamiento creativo, diseños variados y respaldo automático'
+                    : mode === 'pdf-annotate'
+                      ? 'Lectura profunda, razonamiento analítico y respaldo automático entre IAs'
+                      : 'Razonamiento editorial avanzado con respaldo automático si un proveedor falla'}
                 </p>
               </div>
             </div>
-            <span className="shrink-0 rounded-lg bg-white/90 px-2 py-1 text-[10px] font-semibold text-violet-700 shadow-2xs dark:bg-slate-900 dark:text-violet-300">
-              Equipo activo
-            </span>
+            <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-violet-200 bg-white/90 p-0.5 dark:border-violet-900/60 dark:bg-slate-900">
+              {(
+                [
+                  { id: 'low-token', label: 'Ahorro', activeClass: 'bg-emerald-600 text-white' },
+                  { id: 'auto', label: 'Razon. Alto', activeClass: 'bg-violet-600 text-white' },
+                  { id: 'quality', label: 'Máx. Razon.', activeClass: 'bg-indigo-600 text-white' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setEfficiencyMode(opt.id)}
+                  className={`rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    efficiencyMode === opt.id
+                      ? opt.activeClass
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Slide-only Options: Work Mode, Content Preservation, Opt-in Images */}
@@ -754,7 +818,8 @@ export default function AiEditAssistantModal({
                                 : 'bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300'
                         }`}
                       >
-                        ⚡ {docResult.teamRole || docResult.modelUsed}
+                        ⚡ {docResult.taskProfile ? `${docResult.taskProfile} · ` : ''}
+                        {docResult.teamRole || docResult.modelUsed}
                       </span>
                     )}
                   </div>
@@ -941,7 +1006,8 @@ export default function AiEditAssistantModal({
                               : 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300'
                       }`}
                     >
-                      🎨 {slideResult.teamRole || slideResult.modelUsed}
+                      🎨 {slideResult.taskProfile ? `${slideResult.taskProfile} · ` : ''}
+                      {slideResult.teamRole || slideResult.modelUsed}
                     </span>
                   )}
                 </div>

@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versión del release (ej. v5.0.0)'
+        description: 'Versión del release (ej. v5.1.0)'
         required: false
-        default: 'v5.0.0'
+        default: 'v5.1.0'
 
 permissions:
   contents: write
@@ -85,7 +85,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
-          PKG_VER=$(node -p "require('./package.json').version || '5.0.0'")
+          PKG_VER=$(node -p "require('./package.json').version || '5.1.0'")
 
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
             TAG="${{ inputs.version }}"
@@ -97,8 +97,8 @@ jobs:
 
           VERSION_NAME="${TAG#v}"
           VERSION_CODE=$(node -e '
-            const parts = (process.argv[1] || "5.0.0").split(".").map((n) => parseInt(n, 10) || 0);
-            const [maj = 5, min = 0, pat = 0] = parts;
+            const parts = (process.argv[1] || "5.1.0").split(".").map((n) => parseInt(n, 10) || 0);
+            const [maj = 5, min = 1, pat = 0] = parts;
             console.log(maj * 10000 + min * 100 + pat);
           ' "$VERSION_NAME")
 

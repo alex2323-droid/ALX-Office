@@ -160,7 +160,8 @@ export async function ensureUserProfile(
     handleFirestoreError(error, OperationType.GET, path);
   }
 
-  const displayName = (user.displayName || '').slice(0, 120);
+  const fallbackUsername = user.email?.includes('@') ? user.email.split('@')[0] : '';
+  const displayName = (user.displayName || fallbackUsername || '').slice(0, 120);
   const email = (user.email || '').slice(0, 200);
 
   if (!snapshot.exists()) {

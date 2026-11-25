@@ -13,6 +13,14 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidUsername(name) {
+      return name is string &&
+        name.size() >= 3 &&
+        name.size() <= 32 &&
+        name.matches('^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$') &&
+        !name.matches('.*\\.\\..*');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -25,9 +33,8 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isVerifiedOwner(userId) {
+    function isOwner(userId) {
       return isSignedIn() &&
-        request.auth.token.email_verified == true &&
         request.auth.uid == userId;
     }
 
@@ -48,6 +55,16 @@ service cloud.firestore {
         (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
+    }
+
+    function isValidUsernameReservation(data, username) {
+      return data.keys().hasAll(['username', 'ownerId', 'createdAt']) &&
+        data.keys().hasOnly(['username', 'ownerId', 'createdAt']) &&
+        isValidUsername(data.username) &&
+        data.username == username &&
+        isValidId(data.ownerId) &&
+        data.ownerId == request.auth.uid &&
+        data.createdAt is timestamp;
     }
 
     function isValidCloudDocument(data, userId, docId) {
@@ -108,15 +125,27 @@ service cloud.firestore {
     }
 
     // --- Collection Rules ---
-    match /users/{userId} {
-      allow get: if isVerifiedOwner(userId) && isValidId(userId);
+    match /usernames/{username} {
+      allow get: if isValidUsername(username);
       allow list: if false;
-      allow create: if isVerifiedOwner(userId) &&
+      allow create: if isSignedIn() &&
+        isValidUsername(username) &&
+        !exists(/databases/$(database)/documents/usernames/$(username)) &&
+        isValidUsernameReservation(incoming(), username) &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isOwner(existing().ownerId) && isValidUsername(username);
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) &&
         isValidId(userId) &&
         isValidUserProfile(incoming(), userId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isVerifiedOwner(userId) &&
+      allow update: if isOwner(userId) &&
         isValidId(userId) &&
         isValidUserProfile(incoming(), userId) &&
         incoming().uid == existing().uid &&
@@ -128,24 +157,24 @@ service cloud.firestore {
           'theme',
           'updatedAt'
         ]);
-      allow delete: if isVerifiedOwner(userId) && isValidId(userId);
+      allow delete: if isOwner(userId) && isValidId(userId);
 
       match /documents/{docId} {
-        allow get: if isVerifiedOwner(userId) &&
+        allow get: if isOwner(userId) &&
           isValidId(userId) &&
           isValidId(docId) &&
           existing().ownerId == request.auth.uid &&
           parentUserExists(userId);
-        allow list: if isVerifiedOwner(userId) &&
+        allow list: if isOwner(userId) &&
           existing().ownerId == request.auth.uid;
-        allow create: if isVerifiedOwner(userId) &&
+        allow create: if isOwner(userId) &&
           isValidId(userId) &&
           isValidId(docId) &&
           isValidCloudDocument(incoming(), userId, docId) &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
           parentUserExists(userId);
-        allow update: if isVerifiedOwner(userId) &&
+        allow update: if isOwner(userId) &&
           isValidId(userId) &&
           isValidId(docId) &&
           isValidCloudDocument(incoming(), userId, docId) &&
@@ -172,7 +201,7 @@ service cloud.firestore {
               'updatedAt'
             ])
           );
-        allow delete: if isVerifiedOwner(userId) &&
+        allow delete: if isOwner(userId) &&
           isValidId(userId) &&
           isValidId(docId) &&
           existing().ownerId == request.auth.uid &&
